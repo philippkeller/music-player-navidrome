@@ -1,0 +1,9 @@
+// Shared build settings for NaviSync.
+// Put your personal signing settings into Config/Local.xcconfig (git-ignored),
+// see Config/Local.xcconfig.example. Don't pick the team in Xcode's Signing UI,
+// that writes into project.pbxproj and causes merge conflicts on pull.
+
+PRODUCT_BUNDLE_IDENTIFIER = io.backl.navisync
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"

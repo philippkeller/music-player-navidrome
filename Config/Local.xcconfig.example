@@ -1,0 +1,6 @@
+// Copy to Config/Local.xcconfig and fill in your Apple Developer Team ID
+// (developer.apple.com -> Membership details, 10 characters).
+DEVELOPMENT_TEAM = ABCDE12345
+
+// Change if the bundle id is already taken on your account.
+// PRODUCT_BUNDLE_IDENTIFIER = io.backl.navisync

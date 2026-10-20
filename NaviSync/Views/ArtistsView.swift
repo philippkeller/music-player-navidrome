@@ -37,6 +37,7 @@ struct ArtistsView: View {
                 }
             }
         }
+        .listStyle(.plain)
         .overlay {
             if library.artists.isEmpty {
                 if library.isLoadingArtists {

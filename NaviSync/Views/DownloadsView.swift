@@ -33,7 +33,7 @@ struct DownloadsView: View {
                                 model.player.play(group.songs, startAt: index)
                             }
                         } label: {
-                            SongRow(song: song)
+                            SongRow(song: song, subtitle: song.album)
                         }
                         .buttonStyle(.plain)
                         .songActions(song)
@@ -44,6 +44,7 @@ struct DownloadsView: View {
                 }
             }
         }
+        .listStyle(.plain)
         .overlay {
             if groups.isEmpty && downloads.remainingCount == 0 {
                 ContentUnavailableView(

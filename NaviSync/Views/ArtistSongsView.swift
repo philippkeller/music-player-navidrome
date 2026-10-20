@@ -10,27 +10,31 @@ struct ArtistSongsView: View {
 
     private var allSongs: [Song] { content?.allSongs ?? [] }
 
+    /// Album year by album id, shown in the song subtitle.
+    private var albumYears: [String: Int] {
+        Dictionary((content?.albums ?? []).compactMap { section in
+            section.album.year.flatMap { $0 > 0 ? (section.album.id, $0) : nil }
+        }, uniquingKeysWith: { a, _ in a })
+    }
+
     var body: some View {
+        let years = albumYears
         List {
             header
                 .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 16, trailing: 16))
 
-            ForEach(content?.albums ?? []) { section in
-                Section {
-                    ForEach(section.songs) { song in
-                        Button {
-                            play(song)
-                        } label: {
-                            SongRow(song: song)
-                        }
-                        .buttonStyle(.plain)
-                        .songActions(song)
-                    }
-                } header: {
-                    AlbumHeader(section: section)
+            ForEach(allSongs) { song in
+                Button {
+                    play(song)
+                } label: {
+                    SongRow(song: song, subtitle: albumSubtitle(song, years: years))
                 }
+                .buttonStyle(.plain)
+                .songActions(song)
             }
         }
+        .listStyle(.plain)
         .overlay {
             if content == nil {
                 if isLoading {
@@ -44,44 +48,79 @@ struct ArtistSongsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                actionsMenu
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
     }
 
     private var header: some View {
-        HStack(spacing: 16) {
-            CoverArtView(coverArtId: artist.coverArt, cornerRadius: 60)
-                .frame(width: 120, height: 120)
-            VStack(alignment: .leading, spacing: 10) {
-                Text(artist.name).font(.title2.bold()).lineLimit(2)
+        VStack(spacing: 16) {
+            CoverArtView(coverArtId: artist.coverArt, cornerRadius: 8)
+                .frame(maxWidth: 240)
+                .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+                .padding(.top, 8)
+
+            VStack(spacing: 4) {
+                Text(artist.name)
+                    .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
                 if let content {
-                    Text("\(content.albums.count) albums · \(allSongs.count) songs")
+                    Text("\(content.albums.count) Albums · \(allSongs.count) Songs")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 10) {
-                    Button {
-                        model.player.play(allSongs)
-                    } label: {
-                        Label("Play", systemImage: "play.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Button {
-                        model.player.play(allSongs.shuffled())
-                    } label: {
-                        Label("Shuffle", systemImage: "shuffle")
-                    }
-                    .buttonStyle(.bordered)
-
-                    DownloadButton(songs: allSongs)
-                }
-                .controlSize(.small)
-                .disabled(allSongs.isEmpty)
             }
-            Spacer(minLength: 0)
+
+            HStack(spacing: 16) {
+                Button {
+                    model.player.play(allSongs)
+                } label: {
+                    Label("Play", systemImage: "play.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                Button {
+                    model.player.play(allSongs.shuffled())
+                } label: {
+                    Label("Shuffle", systemImage: "shuffle")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(allSongs.isEmpty)
         }
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var actionsMenu: some View {
+        let songs = allSongs
+        let downloads = model.downloads
+        return Menu {
+            Button("Play Next", systemImage: "text.insert") { model.player.playNext(songs) }
+            Button("Add to Queue", systemImage: "text.append") { model.player.addToQueue(songs) }
+            Divider()
+            if downloads.isDownloaded(songs) {
+                Button("Remove Downloads", systemImage: "trash", role: .destructive) {
+                    downloads.remove(songs.map(\.id))
+                }
+            } else {
+                Button("Download All", systemImage: "arrow.down.circle") { downloads.download(songs) }
+            }
+        } label: {
+            Label("More", systemImage: "ellipsis")
+        }
+        .disabled(songs.isEmpty)
+    }
+
+    private func albumSubtitle(_ song: Song, years: [String: Int]) -> String {
+        let year = (song.albumId.flatMap { years[$0] } ?? song.year).flatMap { $0 > 0 ? String($0) : nil }
+        return [song.album, year].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func play(_ song: Song) {
@@ -100,70 +139,5 @@ struct ArtistSongsView: View {
         } catch {
             if content == nil { self.error = error.localizedDescription }
         }
-    }
-}
-
-private struct AlbumHeader: View {
-    let section: AlbumSection
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        HStack(spacing: 10) {
-            CoverArtView(coverArtId: section.album.coverArt, cornerRadius: 4)
-                .frame(width: 40, height: 40)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(section.album.name)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                if let year = section.album.year, year > 0 {
-                    Text(String(year)).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Menu {
-                Button("Play Album", systemImage: "play.fill") { model.player.play(section.songs) }
-                Button("Play Next", systemImage: "text.insert") { model.player.playNext(section.songs) }
-                Button("Add to Queue", systemImage: "text.append") { model.player.addToQueue(section.songs) }
-                if model.downloads.isDownloaded(section.songs) {
-                    Button("Remove Download", systemImage: "trash", role: .destructive) {
-                        model.downloads.remove(section.songs.map(\.id))
-                    }
-                } else {
-                    Button("Download Album", systemImage: "arrow.down.circle") { model.downloads.download(section.songs) }
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle").imageScale(.large)
-            }
-            .buttonStyle(.borderless)
-            .fixedSize()
-        }
-        .textCase(nil)
-        .padding(.vertical, 4)
-    }
-}
-
-/// Download / downloaded toggle for a set of songs.
-struct DownloadButton: View {
-    let songs: [Song]
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let downloads = model.downloads
-        let isDownloaded = downloads.isDownloaded(songs)
-        let inProgress = songs.contains { downloads.state(for: $0.id) == .downloading || downloads.state(for: $0.id) == .queued }
-        Button {
-            if !isDownloaded { downloads.download(songs) }
-        } label: {
-            if inProgress {
-                ProgressView().controlSize(.small)
-            } else {
-                Label(isDownloaded ? "Downloaded" : "Download",
-                      systemImage: isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
-            }
-        }
-        .buttonStyle(.bordered)
-        .labelStyle(.iconOnly)
-        .disabled(isDownloaded || inProgress)
     }
 }

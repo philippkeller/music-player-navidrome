@@ -86,12 +86,8 @@ struct QueueList: View {
                     Button {
                         player.jump(to: index)
                     } label: {
-                        HStack(spacing: 10) {
-                            CoverArtView(coverArtId: song.coverArt, cornerRadius: 4)
-                                .frame(width: 36, height: 36)
-                            SongRow(song: song, showArtist: true)
-                        }
-                        .opacity(index < (player.currentIndex ?? 0) ? 0.5 : 1)
+                        SongRow(song: song, subtitle: song.artist)
+                            .opacity(index < (player.currentIndex ?? 0) ? 0.5 : 1)
                     }
                     .buttonStyle(.plain)
                     .id(index)

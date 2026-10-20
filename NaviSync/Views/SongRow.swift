@@ -1,33 +1,38 @@
 import SwiftUI
 
+/// Song row with album artwork, title and a subtitle (album or artist).
 struct SongRow: View {
     let song: Song
-    var showArtist = false
+    /// Defaults to "Album · Artist" when nil.
+    var subtitle: String?
 
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let isCurrent = model.player.currentSong?.id == song.id
         HStack(spacing: 12) {
-            Group {
-                if isCurrent {
-                    Image(systemName: model.player.isPlaying ? "speaker.wave.2.fill" : "speaker.fill")
-                        .foregroundStyle(.tint)
-                } else {
-                    Text(song.track.map { String($0) } ?? "")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+            CoverArtView(coverArtId: song.coverArt, cornerRadius: 4)
+                .frame(width: 48, height: 48)
+                .overlay {
+                    if isCurrent {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color.black.opacity(0.45))
+                        Image(systemName: model.player.isPlaying ? "speaker.wave.2.fill" : "speaker.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                    }
                 }
-            }
-            .font(.subheadline)
-            .frame(width: 26)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(song.title)
                     .foregroundStyle(isCurrent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                     .lineLimit(1)
-                if showArtist, let artist = song.artist {
-                    Text(artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                let detail = subtitle ?? [song.album, song.artist].compactMap { $0 }.joined(separator: " · ")
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
 
@@ -40,6 +45,7 @@ struct SongRow: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
     }
 }

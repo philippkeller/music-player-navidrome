@@ -43,6 +43,19 @@ are picked up automatically, with no project file edits needed).
 3. Log in with your Navidrome username and password (the server defaults to `https://music.backl.io`).
    Only a salted token is stored in the keychain, never the password.
 
+### Installing on the Mac
+
+Running from Xcode only launches the app from its build folder. To install it properly into
+`/Applications` (so Spotlight, Launchpad and the Dock find it):
+
+```sh
+./scripts/install-mac.sh
+```
+
+This builds a Release version, quits a running NaviSync, replaces `/Applications/NaviSync.app`
+and launches it. Re-run it after a `git pull` to update. Your login and downloads are kept,
+because they live in the app's container, not in the app bundle.
+
 ## Project layout
 
 ```

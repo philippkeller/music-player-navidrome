@@ -21,6 +21,17 @@ struct SettingsView: View {
             Section {
                 LabeledContent("This device", value: sync.clientName)
                 LabeledContent("Last saved", value: sync.lastSaved?.formatted(date: .abbreviated, time: .standard) ?? "—")
+                LabeledContent("Last checked", value: sync.lastChecked?.formatted(date: .abbreviated, time: .standard) ?? "—")
+                if let remote = sync.lastRemote {
+                    LabeledContent("On server") {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(remote.songTitle) · \(formatTime(remote.position))")
+                            Text("from \(remote.deviceName)\(remote.changed.map { ", " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 if let error = sync.lastError {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }

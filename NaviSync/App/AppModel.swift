@@ -31,6 +31,7 @@ final class AppModel {
 
         if let saved = Keychain.loadConfig() {
             apply(saved)
+            sync.restoreLocal()
         }
     }
 

@@ -20,9 +20,14 @@ client that saved it (`changedBy`).
 
 - While playing, the app saves queue + current song + position every ~10 s, and on pause,
   seek, track change and when the app goes to the background.
+- The same state is kept on the device too, so the app always reopens on the last song at its
+  position, even offline or after iOS closed it.
+- Nothing is uploaded unless something changed on this device, so opening and closing an idle app
+  never overwrites what another device is playing.
 - When the app becomes active it fetches the server queue:
   - nothing loaded locally → the remote song is loaded at its position (paused, press play)
-  - another device saved something different → a **"Continue from Mac"** banner with *Resume*
+  - another device saved something newer → a **"Continue from Mac"** banner with *Resume*
+- *Settings → Sync* shows what the server currently holds (song, position, device, time).
 - Devices identify as `NaviSync-iPhone`, `NaviSync-iPad`, `NaviSync-Mac`.
 
 ## Building

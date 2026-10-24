@@ -171,6 +171,8 @@ private struct MacPlayerBar: View {
 
             HStack(spacing: 12) {
                 SyncStatusLabel()
+                BluetoothDevicesButton()
+                OutputPickerButton(size: 22)
                 Button { showQueue.toggle() } label: {
                     Image(systemName: "list.bullet")
                 }

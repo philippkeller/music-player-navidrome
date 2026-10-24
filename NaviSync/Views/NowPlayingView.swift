@@ -43,9 +43,12 @@ struct NowPlayingView: View {
 
             PlaybackControls()
 
+            OutputNameLabel()
+
             HStack {
                 SyncStatusLabel()
                 Spacer()
+                OutputPickerButton()
                 Button {
                     withAnimation { showQueue.toggle() }
                 } label: {

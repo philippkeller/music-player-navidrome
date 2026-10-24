@@ -15,6 +15,8 @@ final class PlayerController {
     private(set) var isPlaying = false
     private(set) var currentTime: Double = 0
     private(set) var duration: Double = 0
+    /// Name of the current audio output when it isn't the device itself (e.g. "JBL Flip 5", "Kitchen").
+    private(set) var externalOutputName: String?
 
     var currentSong: Song? {
         guard let currentIndex, queue.indices.contains(currentIndex) else { return nil }
@@ -33,6 +35,8 @@ final class PlayerController {
     @ObservationIgnored var onScrobble: ((Song, Bool) -> Void)?
 
     @ObservationIgnored private let player = AVPlayer()
+    /// Exposed for the macOS AirPlay picker, which routes a specific player.
+    var avPlayer: AVPlayer { player }
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var itemStatusObservation: NSKeyValueObservation?
     @ObservationIgnored private var notificationObservers: [NSObjectProtocol] = []
@@ -79,8 +83,13 @@ final class PlayerController {
                 if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
                     self?.pause()
                 }
+                self?.updateOutputName()
             }
         })
+        // Long-form audio routes like the Music app: AirPlay 2 speakers (incl. Sonos) get the
+        // whole stream buffered instead of being mirrored as system audio.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, policy: .longFormAudio)
+        updateOutputName()
         #endif
 
         setupRemoteCommands()
@@ -227,8 +236,9 @@ final class PlayerController {
     private func startPlayback() {
         #if os(iOS)
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default)
+        try? session.setCategory(.playback, mode: .default, policy: .longFormAudio)
         try? session.setActive(true)
+        updateOutputName()
         #endif
         isPlaying = true
         // With a pending seek we start playing once the item is ready and positioned.
@@ -301,6 +311,12 @@ final class PlayerController {
     }
 
     #if os(iOS)
+    private func updateOutputName() {
+        let local: Set<AVAudioSession.Port> = [.builtInSpeaker, .builtInReceiver]
+        let output = AVAudioSession.sharedInstance().currentRoute.outputs.first
+        externalOutputName = output.flatMap { local.contains($0.portType) ? nil : $0.portName }
+    }
+
     private func handleInterruption(type: UInt?, options: UInt?) {
         guard let type, let interruption = AVAudioSession.InterruptionType(rawValue: type) else { return }
         switch interruption {

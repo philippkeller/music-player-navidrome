@@ -45,26 +45,6 @@ private struct RoutePickerRepresentable: UIViewRepresentable {
     func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }
 
-/// iOS won't let apps connect Bluetooth devices, so this jumps to Settings → Bluetooth instead.
-/// "App-prefs:Bluetooth" isn't an official URL; if it's refused we open the Settings app.
-struct BluetoothDevicesButton: View {
-    var body: some View {
-        Button {
-            guard let url = URL(string: "App-prefs:Bluetooth") else { return }
-            UIApplication.shared.open(url) { opened in
-                guard !opened, let fallback = URL(string: UIApplication.openSettingsURLString) else { return }
-                UIApplication.shared.open(fallback)
-            }
-        } label: {
-            Image(systemName: "headphones")
-                .font(.title3)
-                .padding(8)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Bluetooth Settings")
-    }
-}
-
 #else
 
 private struct RoutePickerRepresentable: NSViewRepresentable {

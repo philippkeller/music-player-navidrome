@@ -48,7 +48,6 @@ struct NowPlayingView: View {
             HStack {
                 SyncStatusLabel()
                 Spacer()
-                BluetoothDevicesButton()
                 OutputPickerButton()
                 Button {
                     withAnimation { showQueue.toggle() }

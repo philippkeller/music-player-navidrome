@@ -12,7 +12,6 @@ devices**.
 - Queue (play next / add to queue / remove), lock screen, Control Center and media-key controls
 - Scrobbling to Navidrome
 - Output picker in the player: AirPlay 2 speakers (Sonos included), Apple TV, Bluetooth.
-  On iOS a headphones button jumps to Settings → Bluetooth to connect a paired speaker.
   On the Mac there's also a headphones button that reconnects paired Bluetooth devices
 - **Handoff** between iPhone and Mac via the server's saved play queue
 

@@ -52,6 +52,12 @@ fi
 
 cd "$RUNNER_DIR"
 ./svc.sh install >/dev/null 2>&1 || true
+# The runner's launch agent asks for its own security session (SessionCreate), where the
+# login keychain is locked and codesign fails with errSecInternalComponent. Drop that.
+for plist in "$HOME"/Library/LaunchAgents/actions.runner.*.plist; do
+    /usr/libexec/PlistBuddy -c "Delete :SessionCreate" "$plist" 2>/dev/null || true
+done
+./svc.sh stop >/dev/null 2>&1 || true
 ./svc.sh start
 echo
 echo "==> Done. The runner starts with your login. Test it with:"

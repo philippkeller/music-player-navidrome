@@ -86,7 +86,7 @@ EOF
 
 deploy_ios() {
     local app device
-    app="$(build iphoneos)"
+    app="$(build iphoneos)" || exit 1
     device="$(find_iphone)"
     if [ -z "$device" ]; then
         echo "error: no paired iPhone found. Connect it once by cable and open Xcode → Window → Devices and Simulators." >&2
@@ -108,13 +108,13 @@ deploy_ios() {
 
 deploy_mac() {
     local app
-    app="$(build macosx)"
+    app="$(build macosx)" || exit 1
     # Swap the bundle in place instead of quitting the app, so a push doesn't stop the music.
     # A running copy keeps going; the next launch is the new version.
     rm -rf /Applications/NaviSync.app.new
-    ditto "$app" /Applications/NaviSync.app.new
+    ditto "$app" /Applications/NaviSync.app.new || exit 1
     rm -rf /Applications/NaviSync.app
-    mv /Applications/NaviSync.app.new /Applications/NaviSync.app
+    mv /Applications/NaviSync.app.new /Applications/NaviSync.app || exit 1
     echo "==> Installed /Applications/NaviSync.app"
     if [ "${OPEN_MAC_APP:-0}" = 1 ]; then
         open /Applications/NaviSync.app
@@ -127,6 +127,7 @@ case "$TARGETS" in
     ios) deploy_ios ;;
     mac) deploy_mac ;;
     all)
+        # `set -e` is off inside `( … ) ||`, hence the explicit `|| exit 1` in the functions.
         # Each in a subshell, so an unreachable iPhone doesn't stop the Mac update (and vice versa).
         status=0
         ( deploy_ios ) || status=1

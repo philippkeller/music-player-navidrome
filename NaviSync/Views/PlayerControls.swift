@@ -53,6 +53,7 @@ struct ProgressSlider: View {
         if compact {
             HStack(spacing: 8) {
                 Text(formatTime(value)).frame(width: 44, alignment: .trailing)
+                    .overlay(alignment: .leading) { bufferingIndicator.offset(x: -18) }
                 slider.controlSize(.small)
                 Text(formatTime(player.duration)).frame(width: 44, alignment: .leading)
             }
@@ -62,8 +63,9 @@ struct ProgressSlider: View {
         } else {
             VStack(spacing: 4) {
                 slider
-                HStack {
+                HStack(spacing: 6) {
                     Text(formatTime(value))
+                    bufferingIndicator
                     Spacer()
                     Text("-" + formatTime(max(0, player.duration - value)))
                 }
@@ -71,6 +73,15 @@ struct ProgressSlider: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+extension ProgressSlider {
+    @ViewBuilder
+    fileprivate var bufferingIndicator: some View {
+        if model.player.isBuffering {
+            ProgressView().controlSize(.mini)
         }
     }
 }

@@ -15,6 +15,8 @@ final class PlayerController {
     private(set) var isPlaying = false
     private(set) var currentTime: Double = 0
     private(set) var duration: Double = 0
+    /// Playback is wanted but AVPlayer is waiting for data (e.g. after seeking into an unbuffered part).
+    private(set) var isBuffering = false
     /// Name of the current audio output when it isn't the device itself (e.g. "JBL Flip 5", "Kitchen").
     private(set) var externalOutputName: String?
 
@@ -42,6 +44,12 @@ final class PlayerController {
     @ObservationIgnored private var notificationObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var pendingSeek: Double?
     @ObservationIgnored private var isSeeking = false
+    /// Bumped on every seek and item change, so stale seek completions and watchdogs are ignored.
+    @ObservationIgnored private var seekGeneration = 0
+    @ObservationIgnored private var seekWatchdog: Task<Void, Never>?
+    /// The current item was recreated because a seek hung; don't retry again.
+    @ObservationIgnored private var isRetryingSeek = false
+    @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var tickCount = 0
     @ObservationIgnored private var didScrobble = false
     @ObservationIgnored private var wasInterrupted = false
@@ -53,6 +61,10 @@ final class PlayerController {
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
             MainActor.assumeIsolated { self?.handleTick(time) }
+        }
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            Task { @MainActor in self?.isBuffering = waiting }
         }
 
         let center = NotificationCenter.default
@@ -121,6 +133,10 @@ final class PlayerController {
         guard currentSong != nil, !isPlaying else { return }
         if player.currentItem == nil {
             loadCurrent(at: currentTime, autoplay: true)
+        } else if isSeeking {
+            // A seek is still hanging: start over at the target instead of waiting on it.
+            isRetryingSeek = true
+            loadCurrent(at: currentTime, autoplay: true, announce: false)
         } else {
             startPlayback()
         }
@@ -164,11 +180,9 @@ final class PlayerController {
         guard currentSong != nil else { return }
         let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
         currentTime = target
+        isRetryingSeek = false
         if player.currentItem?.status == .readyToPlay {
-            isSeeking = true
-            player.seek(to: CMTime(seconds: target, preferredTimescale: 600)) { [weak self] _ in
-                Task { @MainActor in self?.isSeeking = false }
-            }
+            performSeek(to: target, allowReload: true)
         } else {
             pendingSeek = target
         }
@@ -209,8 +223,13 @@ final class PlayerController {
 
     // MARK: Internals
 
-    private func loadCurrent(at position: Double, autoplay: Bool) {
+    /// - Parameter announce: false when only recreating the item of the same song
+    ///   (keeps artwork and doesn't send another "now playing" scrobble).
+    private func loadCurrent(at position: Double, autoplay: Bool, announce: Bool = true) {
         guard let song = currentSong, let url = urlProvider?(song) else { return }
+        seekGeneration += 1
+        seekWatchdog?.cancel()
+        if announce { isRetryingSeek = false }
         let item = AVPlayerItem(url: url)
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             Task { @MainActor in self?.itemStatusChanged(item) }
@@ -219,18 +238,52 @@ final class PlayerController {
         isSeeking = false
         currentTime = position
         duration = Double(song.duration ?? 0)
-        didScrobble = false
-        tickCount = 0
+        if announce {
+            didScrobble = false
+            tickCount = 0
+        }
         player.replaceCurrentItem(with: item)
         if autoplay {
             startPlayback()
-            onScrobble?(song, false)
+            if announce { onScrobble?(song, false) }
         } else {
             player.pause()
             isPlaying = false
             updateNowPlaying()
         }
-        loadArtwork(for: song)
+        if announce { loadArtwork(for: song) }
+    }
+
+    private func performSeek(to target: Double, allowReload: Bool) {
+        guard let item = player.currentItem else { return }
+        item.cancelPendingSeeks()
+        seekGeneration += 1
+        let generation = seekGeneration
+        isSeeking = true
+        // A little tolerance lets AVPlayer seek to the nearest frame it can reach quickly,
+        // instead of decoding forward through a long VBR stream.
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] finished in
+            Task { @MainActor in
+                guard let self, generation == self.seekGeneration else { return }
+                self.isSeeking = false
+                if finished, self.isPlaying { self.player.play() }
+            }
+        }
+
+        // Seeking into a part of the stream that isn't buffered yet sometimes never completes,
+        // or completes but playback never resumes. Recreate the item at the target in that case.
+        seekWatchdog?.cancel()
+        guard allowReload else { return }
+        seekWatchdog = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, !Task.isCancelled, generation == self.seekGeneration else { return }
+            let stuck = self.isSeeking || (self.isPlaying && self.player.timeControlStatus != .playing)
+            guard stuck else { return }
+            print("Seek to \(target)s hung, reloading the item")
+            self.isRetryingSeek = true
+            self.loadCurrent(at: target, autoplay: self.isPlaying, announce: false)
+        }
     }
 
     private func startPlayback() {
@@ -254,14 +307,8 @@ final class PlayerController {
             if itemDuration.isFinite, itemDuration > 0 { duration = itemDuration }
             if let target = pendingSeek {
                 pendingSeek = nil
-                isSeeking = true
-                player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        self.isSeeking = false
-                        if self.isPlaying { self.player.play() }
-                    }
-                }
+                performSeek(to: target, allowReload: !isRetryingSeek)
+                isRetryingSeek = false
             }
             updateNowPlaying()
         case .failed:

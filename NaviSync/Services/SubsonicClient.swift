@@ -73,7 +73,11 @@ struct SubsonicClient: Sendable {
         return components.url!
     }
 
-    func streamURL(id: String) -> URL { url("stream", [URLQueryItem(name: "id", value: id)]) }
+    /// `format=raw` asks for the original file: transcoded streams can't be seeked with
+    /// byte ranges, so jumping ahead in them hangs.
+    func streamURL(id: String) -> URL {
+        url("stream", [URLQueryItem(name: "id", value: id), URLQueryItem(name: "format", value: "raw")])
+    }
 
     /// Original file, used for offline downloads.
     func downloadURL(id: String) -> URL { url("download", [URLQueryItem(name: "id", value: id)]) }

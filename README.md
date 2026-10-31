@@ -74,20 +74,16 @@ new version is on the iPhone and in `/Applications`. A running Mac app isn't qui
 playing); it picks up the new version on its next launch. Installing on the iPhone restarts the
 app there, and it reopens on the same song and position.
 
-One-time setup:
+One-time setup, on the Mac in this repo:
 
-1. **Runner:** GitHub → repo → *Settings → Actions → Runners → New self-hosted runner* → macOS.
-   Run the shown download and `./config.sh` commands in e.g. `~/actions-runner` (accept the
-   default labels), then run it as a login service so it starts with your session:
-   ```sh
-   cd ~/actions-runner && ./svc.sh install && ./svc.sh start
-   ```
-2. **Team ID:** GitHub → repo → *Settings → Secrets and variables → Actions → Variables* → add
-   `DEVELOPMENT_TEAM` with your Team ID (the same value as in `Config/Local.xcconfig`).
-   Optionally `IPHONE_NAME` (e.g. `Philipp's iPhone`) if more than one iPhone is paired.
-3. **iPhone over Wi-Fi:** the phone needs to have been connected to Xcode by cable once
-   (*Window → Devices and Simulators*). After that Xcode reaches it over the same Wi-Fi.
-4. The first run may show a keychain prompt for `codesign`. Choose *Always Allow*.
+```sh
+scripts/setup-runner.sh
+```
+
+It installs the GitHub CLI if needed (and opens a browser to log in), registers the laptop as the
+repo's runner, starts it as a login service and copies the Team ID from `Config/Local.xcconfig`
+into a repo variable. The first build may show a keychain prompt for `codesign`. Choose
+*Always Allow*.
 
 Requirements while it runs: the laptop is on and logged in. For the iPhone install, the phone
 must be on the same Wi-Fi and preferably unlocked. If the iPhone isn't reachable, the Mac is

@@ -51,6 +51,10 @@ struct SettingsView: View {
                     .disabled(downloads.items.isEmpty)
                 Button("Clear Artwork Cache") { CoverArtCache.shared.clearDisk() }
             }
+
+            Section("App") {
+                LabeledContent("Built", value: Self.buildDate?.formatted(date: .abbreviated, time: .shortened) ?? "—")
+            }
         }
         .formStyle(.grouped)
         .navigationTitle("Settings")
@@ -58,4 +62,8 @@ struct SettingsView: View {
             Button("Delete All", role: .destructive) { downloads.removeAll() }
         }
     }
+
+    /// When this version was built (the executable's modification date).
+    private static let buildDate: Date? = Bundle.main.executableURL
+        .flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date }
 }

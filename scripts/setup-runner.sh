@@ -20,9 +20,16 @@ fi
 REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 echo "==> Repo: $REPO"
 
-TEAM="$(sed -n 's/^DEVELOPMENT_TEAM *= *\([A-Z0-9]*\).*/\1/p' Config/Local.xcconfig 2>/dev/null | tail -n1)"
+# Team ID: from Local.xcconfig or a team picked in Xcode's Signing tab (ignoring the example
+# placeholder), else from the "Apple Development" certificate (its OU is the Team ID).
+TEAM="$(grep -hoE 'DEVELOPMENT_TEAM *= *"?[A-Z0-9]{10}' Config/Local.xcconfig NaviSync.xcodeproj/project.pbxproj 2>/dev/null \
+    | grep -oE '[A-Z0-9]{10}$' | grep -v ABCDE12345 | head -n1 || true)"
 if [ -z "$TEAM" ]; then
-    echo "error: no DEVELOPMENT_TEAM in Config/Local.xcconfig" >&2
+    TEAM="$(security find-certificate -c "Apple Development" -p 2>/dev/null \
+        | openssl x509 -noout -subject 2>/dev/null | grep -oE 'OU *= *[A-Z0-9]{10}' | grep -oE '[A-Z0-9]{10}$' | head -n1 || true)"
+fi
+if [ -z "$TEAM" ]; then
+    echo "error: couldn't find your Team ID. Put it into Config/Local.xcconfig and re-run." >&2
     exit 1
 fi
 gh variable set DEVELOPMENT_TEAM --repo "$REPO" --body "$TEAM"

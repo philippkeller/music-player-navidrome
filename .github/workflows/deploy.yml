@@ -30,3 +30,12 @@ jobs:
         env:
           DEVELOPMENT_TEAM: ${{ vars.DEVELOPMENT_TEAM }}
           IPHONE_NAME: ${{ vars.IPHONE_NAME }}
+
+      - name: Notify
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = success ]; then
+            osascript -e 'display notification "Installed on iPhone and Mac" with title "NaviSync ✓"'
+          else
+            osascript -e 'display notification "Build failed – tell Claude" with title "NaviSync ✗" sound name "Basso"'
+          fi

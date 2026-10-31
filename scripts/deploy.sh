@@ -1,33 +1,35 @@
 #!/bin/bash
-# Builds NaviSync and installs it on the iPhone (over Wi-Fi or cable) and/or into
-# /Applications on this Mac. Used by the GitHub Actions runner on every push, and
-# can be run by hand:
+# Builds the app and installs it on the iPhone (over Wi-Fi or cable) and, if the app
+# supports macOS, into /Applications. Used by the GitHub Actions runner on every push,
+# and can be run by hand:
 #
-#   scripts/deploy.sh          # iPhone + Mac
+#   scripts/deploy.sh          # everything
 #   scripts/deploy.sh ios      # iPhone only
 #   scripts/deploy.sh mac      # Mac only
 #
-# Signing: uses Config/Local.xcconfig, or the DEVELOPMENT_TEAM environment variable.
+# Signing: the team in the project, Config/Local.xcconfig, or the DEVELOPMENT_TEAM env var.
 # Device: the first paired iPhone, or the one named in IPHONE_NAME / IPHONE_ID.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+PROJECT="$(find . -maxdepth 2 -name '*.xcodeproj' | sort | head -n1)"
+APP="$(basename "$PROJECT" .xcodeproj)"   # the target has the project's name
 TARGETS="${1:-all}"
 # Outside the repo so `git clean` (done by the runner's checkout) keeps it: incremental builds.
-BUILD_ROOT="${NAVISYNC_BUILD_ROOT:-$HOME/Library/Caches/NaviSync-Build}"
+CACHE="$HOME/Library/Caches/AutoDeploy"
+BUILD_ROOT="$CACHE/$APP"
 LOG_DIR="$BUILD_ROOT/logs"
 mkdir -p "$LOG_DIR"
-# Live progress for `scripts/live.sh` (tail -f).
-exec > >(tee "$LOG_DIR/deploy.log") 2>&1
+# Live progress of all apps for `scripts/live.sh`.
+LIVE="$CACHE/live.log"
+[ -f "$LIVE" ] && [ "$(wc -c < "$LIVE")" -gt 2000000 ] && : > "$LIVE"
+exec > >(awk -v p="[$APP] " '{ print p $0; fflush() }' | tee -a "$LIVE") 2>&1
 echo "==> $(date '+%H:%M:%S') Deploy started: $(git log -1 --format=%s)"
 
 SETTINGS=()
 if [ -n "${DEVELOPMENT_TEAM:-}" ]; then
     SETTINGS+=("DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM")
-elif [ ! -f Config/Local.xcconfig ]; then
-    echo "error: no signing team. Create Config/Local.xcconfig (see README) or set DEVELOPMENT_TEAM." >&2
-    exit 1
 fi
 
 # build <sdk> → prints the path of the built app
@@ -36,8 +38,8 @@ build() {
     local log="$LOG_DIR/build-$sdk.log"
     echo "==> Building for $sdk" >&2
     if ! xcodebuild \
-        -project NaviSync.xcodeproj \
-        -target NaviSync \
+        -project "$PROJECT" \
+        -target "$APP" \
         -configuration Release \
         -sdk "$sdk" \
         -allowProvisioningUpdates \
@@ -52,11 +54,10 @@ build() {
         tail -n 40 "$log" >&2
         exit 1
     fi
-    grep -E "warning:.*NaviSync/" "$log" | sort -u >&2 || true
     if [ "$sdk" = macosx ]; then
-        echo "$BUILD_ROOT/Products/Release/NaviSync.app"
+        echo "$BUILD_ROOT/Products/Release/$APP.app"
     else
-        echo "$BUILD_ROOT/Products/Release-$sdk/NaviSync.app"
+        echo "$BUILD_ROOT/Products/Release-$sdk/$APP.app"
     fi
 }
 
@@ -65,7 +66,7 @@ find_iphone() {
     local json
     json="$(mktemp)"
     xcrun devicectl list devices --json-output "$json" >/dev/null 2>&1 || true
-    /usr/bin/python3 - "$json" "${IPHONE_NAME:-}" <<'EOF'
+    /usr/bin/python3 - "$json" "${IPHONE_NAME:-}" <<'PY'
 import json, sys
 path, wanted = sys.argv[1], sys.argv[2]
 try:
@@ -83,7 +84,7 @@ candidates = [d for d in devices if ok(d)]
 candidates.sort(key=lambda d: d.get("connectionProperties", {}).get("tunnelState") != "connected")
 if candidates:
     print(candidates[0]["identifier"])
-EOF
+PY
     rm -f "$json"
 }
 
@@ -110,21 +111,23 @@ deploy_ios() {
 }
 
 deploy_mac() {
-    local app
+    local app dest="/Applications/$APP.app"
     app="$(build macosx)" || exit 1
-    # Swap the bundle in place instead of quitting the app, so a push doesn't stop the music.
+    # Swap the bundle in place instead of quitting the app, so a push doesn't stop it.
     # A running copy keeps going; the next launch is the new version.
-    rm -rf /Applications/NaviSync.app.new
-    ditto "$app" /Applications/NaviSync.app.new || exit 1
-    rm -rf /Applications/NaviSync.app
-    mv /Applications/NaviSync.app.new /Applications/NaviSync.app || exit 1
-    echo "==> Installed /Applications/NaviSync.app"
+    rm -rf "$dest.new"
+    ditto "$app" "$dest.new" || exit 1
+    rm -rf "$dest"
+    mv "$dest.new" "$dest" || exit 1
+    echo "==> Installed $dest"
     if [ "${OPEN_MAC_APP:-0}" = 1 ]; then
-        open /Applications/NaviSync.app
-    elif pgrep -xq NaviSync; then
-        echo "    NaviSync is running; quit and reopen it to use the new version."
+        open "$dest"
+    elif pgrep -xq "$APP"; then
+        echo "    $APP is running; quit and reopen it to use the new version."
     fi
 }
+
+supports_mac() { grep -q 'SUPPORTED_PLATFORMS = .*macosx' "$PROJECT/project.pbxproj"; }
 
 case "$TARGETS" in
     ios) deploy_ios ;;
@@ -134,7 +137,8 @@ case "$TARGETS" in
         # Each in a subshell, so an unreachable iPhone doesn't stop the Mac update (and vice versa).
         status=0
         ( deploy_ios ) || status=1
-        ( deploy_mac ) || status=1
+        if supports_mac; then ( deploy_mac ) || status=1; fi
+        [ $status = 0 ] && echo "==> $(date '+%H:%M:%S') Done ✓" || echo "==> $(date '+%H:%M:%S') FAILED ✗"
         exit $status
         ;;
     *) echo "usage: $0 [ios|mac|all]" >&2; exit 2 ;;

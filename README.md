@@ -81,8 +81,8 @@ scripts/setup-runner.sh
 ```
 
 It installs the GitHub CLI if needed (and opens a browser to log in), registers the laptop as the
-repo's runner, starts it as a login service and copies the Team ID from `Config/Local.xcconfig`
-into a repo variable. The first build may show a keychain prompt for `codesign`. Choose
+runner for this and the other app repos listed in the script, starts them as login services and
+sets the Team ID as a repo variable. `scripts/live.sh` shows all builds live. The first build may show a keychain prompt for `codesign`. Choose
 *Always Allow*.
 
 Requirements while it runs: the laptop is on and logged in. For the iPhone install, the phone

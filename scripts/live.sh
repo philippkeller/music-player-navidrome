@@ -1,5 +1,6 @@
 #!/bin/sh
-# Shows the current/last automatic build live. Ctrl+C to stop.
-LOG="$HOME/Library/Caches/NaviSync-Build/logs/deploy.log"
+# Shows the automatic builds of all apps live. Ctrl+C to stop.
+LOG="$HOME/Library/Caches/AutoDeploy/live.log"
+mkdir -p "$(dirname "$LOG")"
 touch "$LOG"
 exec tail -n 30 -F "$LOG"

@@ -1,5 +1,5 @@
-# Builds on every push to main and installs the app on the iPhone and the Mac.
-# Runs on a self-hosted runner on the Mac laptop (see README → Automatic installs).
+# Builds on every push to main and installs the app on the iPhone (and the Mac, if supported).
+# Runs on a self-hosted runner on the Mac laptop. Live progress: scripts/live.sh
 name: Build & install
 
 on:
@@ -34,8 +34,9 @@ jobs:
       - name: Notify
         if: always()
         run: |
+          app="${{ github.event.repository.name }}"
           if [ "${{ job.status }}" = success ]; then
-            osascript -e 'display notification "Installed on iPhone and Mac" with title "NaviSync ✓"'
+            osascript -e "display notification \"Installed\" with title \"$app ✓\""
           else
-            osascript -e 'display notification "Build failed – tell Claude" with title "NaviSync ✗" sound name "Basso"'
+            osascript -e "display notification \"Build failed – tell Claude\" with title \"$app ✗\" sound name \"Basso\""
           fi

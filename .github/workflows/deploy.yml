@@ -1,0 +1,32 @@
+# Builds on every push to main and installs the app on the iPhone and the Mac.
+# Runs on a self-hosted runner on the Mac laptop (see README → Automatic installs).
+name: Build & install
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "What to install"
+        type: choice
+        options: [all, ios, mac]
+        default: all
+
+# A newer push replaces a build that is still running.
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and install
+        run: scripts/deploy.sh "${{ inputs.targets || 'all' }}"
+        env:
+          DEVELOPMENT_TEAM: ${{ vars.DEVELOPMENT_TEAM }}
+          IPHONE_NAME: ${{ vars.IPHONE_NAME }}

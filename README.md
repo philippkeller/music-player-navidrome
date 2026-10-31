@@ -60,8 +60,39 @@ Running from Xcode only launches the app from its build folder. To install it pr
 ```
 
 This builds a Release version, quits a running NaviSync, replaces `/Applications/NaviSync.app`
-and launches it. Re-run it after a `git pull` to update. Your login and downloads are kept,
-because they live in the app's container, not in the app bundle.
+and launches it. Your login and downloads are kept, because they live in the app's container,
+not in the app bundle.
+
+`scripts/deploy.sh [ios|mac|all]` builds and installs without Xcode's UI: on the iPhone (over
+Wi-Fi or cable) and/or into `/Applications`.
+
+### Automatic installs on every push
+
+A GitHub Actions workflow (`.github/workflows/deploy.yml`) runs `scripts/deploy.sh` on a
+self-hosted runner on the Mac laptop for every push to `main`. A minute or two after a push the
+new version is on the iPhone and in `/Applications`. A running Mac app isn't quit (so music keeps
+playing); it picks up the new version on its next launch. Installing on the iPhone restarts the
+app there, and it reopens on the same song and position.
+
+One-time setup:
+
+1. **Runner:** GitHub → repo → *Settings → Actions → Runners → New self-hosted runner* → macOS.
+   Run the shown download and `./config.sh` commands in e.g. `~/actions-runner` (accept the
+   default labels), then run it as a login service so it starts with your session:
+   ```sh
+   cd ~/actions-runner && ./svc.sh install && ./svc.sh start
+   ```
+2. **Team ID:** GitHub → repo → *Settings → Secrets and variables → Actions → Variables* → add
+   `DEVELOPMENT_TEAM` with your Team ID (the same value as in `Config/Local.xcconfig`).
+   Optionally `IPHONE_NAME` (e.g. `Philipp's iPhone`) if more than one iPhone is paired.
+3. **iPhone over Wi-Fi:** the phone needs to have been connected to Xcode by cable once
+   (*Window → Devices and Simulators*). After that Xcode reaches it over the same Wi-Fi.
+4. The first run may show a keychain prompt for `codesign`. Choose *Always Allow*.
+
+Requirements while it runs: the laptop is on and logged in. For the iPhone install, the phone
+must be on the same Wi-Fi and preferably unlocked. If the iPhone isn't reachable, the Mac is
+still updated and the run is marked failed. Re-run it from the *Actions* tab
+(*Build & install → Run workflow*, choose `ios`). Build errors are shown in the run's log.
 
 ## Project layout
 

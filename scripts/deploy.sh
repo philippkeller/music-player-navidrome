@@ -18,6 +18,9 @@ TARGETS="${1:-all}"
 BUILD_ROOT="${NAVISYNC_BUILD_ROOT:-$HOME/Library/Caches/NaviSync-Build}"
 LOG_DIR="$BUILD_ROOT/logs"
 mkdir -p "$LOG_DIR"
+# Live progress for `scripts/live.sh` (tail -f).
+exec > >(tee "$LOG_DIR/deploy.log") 2>&1
+echo "==> $(date '+%H:%M:%S') Deploy started: $(git log -1 --format=%s)"
 
 SETTINGS=()
 if [ -n "${DEVELOPMENT_TEAM:-}" ]; then
@@ -41,7 +44,7 @@ build() {
         SYMROOT="$BUILD_ROOT/Products" \
         OBJROOT="$BUILD_ROOT/Intermediates" \
         "${SETTINGS[@]+"${SETTINGS[@]}"}" \
-        build >"$log" 2>&1
+        build 2>&1 | tee "$log" | { grep --line-buffered -E "^(SwiftCompile|CompileSwift |Ld |CodeSign )|error:" | cut -c1-120 >&2 || true; }
     then
         echo "==> Build for $sdk FAILED. Errors:" >&2
         grep -E "error:|fatal error|Code ?Sign|provisioning" "$log" | sort -u >&2 || true

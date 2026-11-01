@@ -70,23 +70,29 @@ struct NowPlayingView: View {
     }
 }
 
-/// Small "Synced 10:42" indicator.
+/// Small "Synced 10:42" indicator. Click to refresh library, artwork and playback sync.
 struct SyncStatusLabel: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let sync = model.sync
-        Group {
-            if sync.lastError != nil {
+        Button {
+            Task { await model.refreshAll() }
+        } label: {
+            if model.isRefreshing {
+                Label("Syncing…", systemImage: "arrow.triangle.2.circlepath")
+            } else if sync.lastError != nil {
                 Label("Offline", systemImage: "icloud.slash")
             } else if let saved = sync.lastSaved {
                 Label("Synced \(saved.formatted(date: .omitted, time: .shortened))", systemImage: "arrow.triangle.2.circlepath")
             } else {
-                EmptyView()
+                Label("Sync", systemImage: "arrow.triangle.2.circlepath")
             }
         }
+        .buttonStyle(.borderless)
         .font(.caption)
         .foregroundStyle(.secondary)
-        .help(sync.lastError ?? "Playback position is synced via your Navidrome server")
+        .disabled(model.isRefreshing)
+        .help(sync.lastError ?? "Click to refresh new albums and artwork from your Navidrome server")
     }
 }

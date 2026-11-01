@@ -7,6 +7,9 @@ import SwiftUI
 final class AppModel {
     private(set) var config: ServerConfig?
     var showNowPlaying = false
+    /// Bumped by `refreshAll()` so artwork and open artist pages reload.
+    private(set) var refreshGeneration = 0
+    private(set) var isRefreshing = false
 
     let player: PlayerController
     let library: LibraryStore
@@ -64,6 +67,18 @@ final class AppModel {
         downloads.client = nil
         sync.client = nil
         CoverArtCache.shared.client = nil
+    }
+
+    /// Re-fetch artists, artist pages and artwork from the server, and sync playback.
+    func refreshAll() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        CoverArtCache.shared.clearDisk()
+        refreshGeneration += 1
+        async let artists: Void = library.refreshArtists()
+        async let save: Void = sync.saveNow()
+        _ = await (artists, save)
     }
 
     func playbackURL(for song: Song) -> URL? {

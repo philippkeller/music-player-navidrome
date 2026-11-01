@@ -77,6 +77,7 @@ struct CoverArtView: View {
     let coverArtId: String?
     var cornerRadius: CGFloat = 6
 
+    @Environment(AppModel.self) private var model
     @State private var image: PlatformImage?
 
     var body: some View {
@@ -93,7 +94,7 @@ struct CoverArtView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .task(id: coverArtId) {
+            .task(id: "\(coverArtId ?? "")#\(model.refreshGeneration)") {
                 image = await CoverArtCache.shared.image(for: coverArtId)
             }
     }

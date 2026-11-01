@@ -54,7 +54,7 @@ struct ArtistSongsView: View {
             }
         }
         .refreshable { await load() }
-        .task { await load() }
+        .task(id: model.refreshGeneration) { await load() }
     }
 
     private var header: some View {

@@ -45,6 +45,7 @@ struct DownloadsView: View {
             }
         }
         .listStyle(.plain)
+        .playerInset()
         .overlay {
             if groups.isEmpty && downloads.remainingCount == 0 {
                 ContentUnavailableView(

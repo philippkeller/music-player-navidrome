@@ -35,6 +35,7 @@ struct ArtistSongsView: View {
             }
         }
         .listStyle(.plain)
+        .playerInset()
         .overlay {
             if content == nil {
                 if isLoading {

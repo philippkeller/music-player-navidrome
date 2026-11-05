@@ -38,6 +38,7 @@ struct ArtistsView: View {
             }
         }
         .listStyle(.plain)
+        .playerInset()
         .overlay {
             if library.artists.isEmpty {
                 if library.isLoadingArtists {

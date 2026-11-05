@@ -10,11 +10,9 @@ struct PhoneMainView: View {
         @Bindable var model = model
         TabView {
             NavigationStack { ArtistsView() }
-                .safeAreaInset(edge: .bottom) { PlayerInset() }
                 .tabItem { Label("Library", systemImage: "music.note.list") }
 
             NavigationStack { DownloadsView() }
-                .safeAreaInset(edge: .bottom) { PlayerInset() }
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
 
             NavigationStack { SettingsView() }
@@ -23,6 +21,14 @@ struct PhoneMainView: View {
         .sheet(isPresented: $model.showNowPlaying) {
             NowPlayingView()
         }
+    }
+}
+
+extension View {
+    /// Pins the mini player below a list. Must sit on the list itself: on a NavigationStack
+    /// the list doesn't scroll its last rows clear of the bar.
+    func playerInset() -> some View {
+        safeAreaInset(edge: .bottom) { PlayerInset() }
     }
 }
 
@@ -88,6 +94,11 @@ private struct MiniPlayerBar: View {
 }
 
 #else
+
+extension View {
+    /// The Mac player bar sits below the content, so lists need no inset.
+    func playerInset() -> some View { self }
+}
 
 /// Mac: sidebar + content, with a player bar along the bottom of the window.
 struct MacMainView: View {

@@ -12,8 +12,9 @@ devices**.
 - Queue (play next / add to queue / remove), lock screen, Control Center and media-key controls
 - Scrobbling to Navidrome
 - Sonos button in the player: plays directly on a Sonos room over the network (UPnP), also on
-  speakers without AirPlay. The speaker streams from the server and keeps going without the app, but the
-  lock screen and volume buttons don't control it; use the app. The server must be reachable from the speaker
+  speakers without AirPlay. The speaker streams from the server and keeps going without the app. Volume
+  slider in the player; the iPhone's volume buttons control the speaker while the app is open, the lock
+  screen doesn't. The server must be reachable from the speaker
 - Output picker in the player: AirPlay 2 speakers, Apple TV, Bluetooth.
   On the Mac there's also a headphones button that reconnects paired Bluetooth devices
 - **Handoff** between iPhone and Mac via the server's saved play queue

@@ -1,4 +1,5 @@
 import AVKit
+import MediaPlayer
 import SwiftUI
 
 /// The system AirPlay / audio output picker. Lists AirPlay 2 speakers, Apple TVs and,
@@ -30,6 +31,24 @@ struct OutputNameLabel: View {
                 .font(.caption)
                 .foregroundStyle(.tint)
                 .lineLimit(1)
+        }
+    }
+}
+
+/// The Sonos room's volume; only shown while playing on Sonos.
+struct SonosVolumeSlider: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let player = model.player
+        if player.sonosRoom != nil {
+            HStack(spacing: 10) {
+                Image(systemName: "speaker.fill")
+                Slider(value: Binding(get: { player.sonosVolume }, set: { player.setSonosVolume($0) }), in: 0...100)
+                Image(systemName: "speaker.wave.3.fill")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 }
@@ -78,7 +97,7 @@ private struct SonosRoomList: View {
             }
             if player.sonosRoom != nil {
                 Section("Volume") {
-                    Slider(value: Binding(get: { player.sonosVolume }, set: { player.setSonosVolume($0) }), in: 0...100)
+                    SonosVolumeSlider()
                 }
             }
             if !isSearching, rooms.isEmpty {
@@ -139,6 +158,24 @@ private struct SonosRoomList: View {
 }
 
 #if os(iOS)
+
+/// Invisible while playing on Sonos. Lets the player set the iPhone's own volume, which needs this
+/// system view's slider, and keeps iOS from showing its volume overlay for the iPhone's volume.
+struct SonosVolumeKeys: UIViewRepresentable {
+    let player: PlayerController
+
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        player.setSystemVolume = { [weak view] volume in
+            view?.subviews.compactMap { $0 as? UISlider }.first?.value = volume
+        }
+        // The first look at the volume happens before this view exists.
+        DispatchQueue.main.async { player.recenterIfAtLimit() }
+        return view
+    }
+
+    func updateUIView(_ view: MPVolumeView, context: Context) {}
+}
 
 private struct RoutePickerRepresentable: UIViewRepresentable {
     let player: AVPlayer

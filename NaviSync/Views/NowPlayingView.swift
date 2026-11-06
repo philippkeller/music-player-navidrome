@@ -43,6 +43,8 @@ struct NowPlayingView: View {
 
             PlaybackControls()
 
+            SonosVolumeSlider()
+
             OutputNameLabel()
 
             HStack {

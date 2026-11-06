@@ -90,6 +90,7 @@ final class AppModel {
     func scenePhaseChanged(_ phase: ScenePhase) {
         switch phase {
         case .active:
+            player.sonosAppBecameActive()
             Task { await sync.checkRemote() }
         case .background:
             Task { await sync.saveNow() }

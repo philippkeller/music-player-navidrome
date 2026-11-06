@@ -18,6 +18,14 @@ struct PhoneMainView: View {
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gear") }
         }
+        .background {
+            if model.player.sonosRoom != nil {
+                SonosVolumeKeys(player: model.player)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .allowsHitTesting(false)
+            }
+        }
         .sheet(isPresented: $model.showNowPlaying) {
             NowPlayingView()
         }

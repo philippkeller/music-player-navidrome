@@ -74,6 +74,18 @@ final class PlayerController {
     @ObservationIgnored private var sonosPoll: Task<Void, Never>?
     @ObservationIgnored private var pendingSonosVolume: Int?
     @ObservationIgnored private var sonosVolumeTask: Task<Void, Never>?
+    /// A status read shortly after changing the volume may still have the old value.
+    @ObservationIgnored private var sonosVolumeChanged = Date.distantPast
+    #if os(iOS)
+    /// Sets the iPhone's own volume; provided by `SonosVolumeKeys` while it's on screen.
+    @ObservationIgnored var setSystemVolume: ((Float) -> Void)?
+    @ObservationIgnored private var volumeKeyObservation: NSKeyValueObservation?
+    @ObservationIgnored private var lastOutputVolume: Float = 0
+    /// The value we set ourselves, whose change isn't a key press.
+    @ObservationIgnored private var recenterTarget: Float?
+    /// The iPhone's volume before recentering, restored when leaving Sonos.
+    @ObservationIgnored private var volumeBeforeRecenter: Float?
+    #endif
 
     init() {
         timeObserver = player.addPeriodicTimeObserver(
@@ -545,6 +557,7 @@ extension PlayerController {
 
     func setSonosVolume(_ volume: Double) {
         sonosVolume = volume
+        sonosVolumeChanged = Date()
         pendingSonosVolume = Int(volume.rounded())
         guard sonosVolumeTask == nil, let room = sonosRoom else { return }
         // Sends only the latest value, so dragging never queues up requests.
@@ -559,9 +572,63 @@ extension PlayerController {
 
     func refreshSonosVolume() async {
         guard let room = sonosRoom, let volume = try? await SonosClient(host: room.host).volume(),
-              sonosVolumeTask == nil else { return }
+              room == sonosRoom, sonosVolumeTask == nil,
+              Date().timeIntervalSince(sonosVolumeChanged) > 2 else { return }
         sonosVolume = Double(volume)
     }
+
+    /// The app is in front again: iOS may have deactivated the audio session the volume keys rely on.
+    func sonosAppBecameActive() {
+        guard sonosRoom != nil else { return }
+        #if os(iOS)
+        watchVolumeKeys()
+        #endif
+    }
+
+    #if os(iOS)
+    /// iOS has no API for the volume keys, but they change the output volume while our audio session
+    /// is active. Those changes are passed on to the speaker.
+    private func watchVolumeKeys() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setActive(true)
+        lastOutputVolume = session.outputVolume
+        recenterIfAtLimit()
+        volumeKeyObservation = session.observe(\.outputVolume, options: [.new]) { [weak self] _, change in
+            guard let volume = change.newValue else { return }
+            Task { @MainActor in self?.outputVolumeChanged(volume) }
+        }
+    }
+
+    private func outputVolumeChanged(_ volume: Float) {
+        guard sonosRoom != nil else { return }
+        let delta = volume - lastOutputVolume
+        lastOutputVolume = volume
+        if let target = recenterTarget, abs(volume - target) < 0.01 {
+            recenterTarget = nil
+            return
+        }
+        guard abs(delta) > 0.001 else { return }
+        // One key press is 1/16 of the range, which makes 4 on the speaker's 0–100.
+        let step = (Double(delta) * 64).rounded()
+        setSonosVolume(min(100, max(0, sonosVolume + (step == 0 ? (delta > 0 ? 1 : -1) : step))))
+        recenterIfAtLimit()
+    }
+
+    /// At the iPhone's minimum or maximum a key press changes nothing, so we wouldn't see it.
+    func recenterIfAtLimit() {
+        guard sonosRoom != nil, let setSystemVolume, lastOutputVolume <= 0.01 || lastOutputVolume >= 0.99 else { return }
+        if volumeBeforeRecenter == nil { volumeBeforeRecenter = lastOutputVolume }
+        recenterTarget = 0.5
+        setSystemVolume(0.5)
+    }
+
+    private func stopWatchingVolumeKeys() {
+        volumeKeyObservation = nil
+        recenterTarget = nil
+        if let volumeBeforeRecenter { setSystemVolume?(volumeBeforeRecenter) }
+        volumeBeforeRecenter = nil
+    }
+    #endif
 
     private func attachSonos(_ room: SonosRoom) {
         player.pause()
@@ -582,9 +649,15 @@ extension PlayerController {
             }
         }
         Task { await refreshSonosVolume() }
+        #if os(iOS)
+        watchVolumeKeys()
+        #endif
     }
 
     private func detachSonos() {
+        #if os(iOS)
+        stopWatchingVolumeKeys()
+        #endif
         sonosPoll?.cancel()
         sonosRoom = nil
         isBuffering = false
@@ -650,6 +723,7 @@ extension PlayerController {
             guard room == sonosRoom, generation == sonosGeneration else { return }
             sonosFailures = 0
             apply(status, room: room)
+            await refreshSonosVolume()
         } catch {
             guard room == sonosRoom else { return }
             sonosFailures += 1

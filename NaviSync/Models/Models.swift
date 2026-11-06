@@ -32,6 +32,7 @@ struct Song: Codable, Identifiable, Hashable, Sendable {
     var coverArt: String?
     var suffix: String?
     var size: Int?
+    var samplingRate: Int?
 
     /// Album order: disc, then track number, then title.
     static func trackOrder(_ a: Song, _ b: Song) -> Bool {

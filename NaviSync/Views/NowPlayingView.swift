@@ -48,6 +48,7 @@ struct NowPlayingView: View {
             HStack {
                 SyncStatusLabel()
                 Spacer()
+                SonosButton()
                 OutputPickerButton()
                 Button {
                     withAnimation { showQueue.toggle() }

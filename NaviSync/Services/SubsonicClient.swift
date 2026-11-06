@@ -79,6 +79,25 @@ struct SubsonicClient: Sendable {
         url("stream", [URLQueryItem(name: "id", value: id), URLQueryItem(name: "format", value: "raw")])
     }
 
+    /// Sonos plays MP3, AAC and FLAC up to 48 kHz natively; everything else is transcoded to MP3 by the server.
+    func sonosTrack(for song: Song) -> SonosTrack {
+        let suffix = song.suffix?.lowercased() ?? ""
+        let native = ["mp3": "audio/mpeg", "flac": "audio/flac", "m4a": "audio/mp4", "aac": "audio/aac"]
+        let mimeType: String
+        let stream: URL
+        if let mime = native[suffix], suffix != "flac" || (song.samplingRate ?? 0) <= 48000 {
+            mimeType = mime
+            stream = streamURL(id: song.id)
+        } else {
+            mimeType = "audio/mpeg"
+            stream = url("stream", [URLQueryItem(name: "id", value: song.id),
+                                    URLQueryItem(name: "format", value: "mp3"),
+                                    URLQueryItem(name: "maxBitRate", value: "320")])
+        }
+        return SonosTrack(url: stream, mimeType: mimeType, title: song.title, artist: song.artist, album: song.album,
+                          duration: song.duration, artURL: song.coverArt.map { coverArtURL(id: $0, size: 300) })
+    }
+
     /// Original file, used for offline downloads.
     func downloadURL(id: String) -> URL { url("download", [URLQueryItem(name: "id", value: id)]) }
 

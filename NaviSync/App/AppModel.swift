@@ -26,6 +26,7 @@ final class AppModel {
         sync = SyncService(player: player)
 
         player.urlProvider = { [weak self] song in self?.playbackURL(for: song) }
+        player.sonosTrackProvider = { [weak self] song in self?.client?.sonosTrack(for: song) }
         player.onEvent = { [weak self] event in self?.sync.handle(event) }
         player.onScrobble = { [weak self] song, submission in
             guard let client = self?.client else { return }
@@ -35,6 +36,7 @@ final class AppModel {
         if let saved = Keychain.loadConfig() {
             apply(saved)
             sync.restoreLocal()
+            player.reconnectSonos()
         }
     }
 

@@ -13,6 +13,7 @@ xcrun swiftc -parse-as-library -swift-version 5 -target "$(uname -m)-apple-macos
     NaviSync/Services/SonosClient.swift \
     NaviSync/Services/PlayerController.swift \
     NaviSync/Services/PlaybackProgressWatchdog.swift \
+    NaviSync/Services/MP3OffsetLoader.swift \
     Tests/SeekRegression.swift \
     -o "$seek_test_dir/seek-regression"
 "$seek_test_dir/seek-regression"

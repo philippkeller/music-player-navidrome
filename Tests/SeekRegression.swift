@@ -96,6 +96,12 @@ struct SeekRegression {
         player.load([mp3, flac], index: 0, position: 0, autoplay: false)
         player.seek(to: 300)
         precondition(player.currentSong?.id == "two" && !player.isPlaying)
+        // MP3s of known size seek by byte offset into the raw file instead of transcoding.
+        let sized = Song(id: "three", title: "Three", duration: 300, suffix: "mp3", size: 3_000_000)
+        player.load([sized], index: 0, position: 150, autoplay: true)
+        let sizedURL = (player.avPlayer.currentItem!.asset as! AVURLAsset).url
+        precondition(sizedURL.scheme == MP3OffsetLoader.scheme && query(sizedURL)["format"] == "raw")
+        precondition(player.currentTime == 150 && player.isPlaying)
         player.urlProvider = { _ in nil }
         player.load([mp3], index: 0, position: 100, autoplay: true)
         precondition(player.playbackError != nil && !player.isPlaying && !player.isBuffering)

@@ -59,6 +59,7 @@ final class PlayerController {
     /// The server starts offset streams at this absolute song position.
     @ObservationIgnored private var streamOffset: Double = 0
     @ObservationIgnored private var usesOffsetStream = false
+    @ObservationIgnored private var mp3Loader: MP3OffsetLoader?
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var tickCount = 0
     @ObservationIgnored private var didScrobble = false
@@ -309,17 +310,22 @@ final class PlayerController {
         playbackError = nil
         usesOffsetStream = !originalURL.isFileURL && (position > 0 || serverSeek)
         streamOffset = usesOffsetStream ? floor(position) : 0
-        let url: URL
-        if usesOffsetStream {
+        let asset: AVURLAsset
+        if usesOffsetStream, let loader = MP3OffsetLoader(source: originalURL, song: song, position: position) {
+            // Raw MP3 from a byte offset: original quality and range requests, no transcoding.
+            mp3Loader = loader
+            streamOffset = position
+            asset = loader.asset
+        } else if usesOffsetStream {
             guard let streamURL = offsetStreamURLProvider?(song, streamOffset) else {
                 failSeek()
                 return
             }
-            url = streamURL
+            asset = AVURLAsset(url: streamURL)
         } else {
-            url = originalURL
+            asset = AVURLAsset(url: originalURL)
         }
-        let item = AVPlayerItem(url: url)
+        let item = AVPlayerItem(asset: asset)
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             Task { @MainActor in self?.itemStatusChanged(item) }
         }
@@ -393,7 +399,10 @@ final class PlayerController {
             player.timeControlStatus != .playing)
     }
 
+    /// Called whenever the current item is about to be replaced or dropped.
     private func resetSeek() {
+        mp3Loader?.cancel()
+        mp3Loader = nil
         seekGeneration += 1
         seekWatchdog?.cancel()
         seekWatchdog = nil

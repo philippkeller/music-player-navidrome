@@ -60,6 +60,9 @@ final class PlayerController {
     @ObservationIgnored private var streamOffset: Double = 0
     @ObservationIgnored private var usesOffsetStream = false
     @ObservationIgnored private var mp3Loader: MP3OffsetLoader?
+    #if os(iOS)
+    @ObservationIgnored private var silence: AVAudioPlayer?
+    #endif
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var tickCount = 0
     @ObservationIgnored private var didScrobble = false
@@ -531,6 +534,11 @@ final class PlayerController {
     }
 
     private func handleInterruption(type: UInt?, options: UInt?) {
+        if sonosRoom != nil {
+            // A call stops the silent keep-alive, while the speaker keeps playing.
+            if type == AVAudioSession.InterruptionType.ended.rawValue { updateSilence() }
+            return
+        }
         // A phone call doesn't stop the speaker.
         guard sonosRoom == nil, let type, let interruption = AVAudioSession.InterruptionType(rawValue: type) else { return }
         switch interruption {
@@ -586,6 +594,9 @@ final class PlayerController {
     }
 
     private func updateNowPlaying() {
+        #if os(iOS)
+        updateSilence()
+        #endif
         let center = MPNowPlayingInfoCenter.default()
         guard let song = currentSong else {
             center.nowPlayingInfo = nil
@@ -700,6 +711,41 @@ extension PlayerController {
     }
 
     #if os(iOS)
+    /// iOS only shows lock screen controls (and passes on volume keys in the background) while the
+    /// app plays audio itself. The speaker streams from the server, so play silence while it plays.
+    private func updateSilence() {
+        let wanted = sonosRoom != nil && isPlaying
+        if wanted, silence?.isPlaying != true {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .default, policy: .longFormAudio)
+            try? session.setActive(true)
+            if silence == nil {
+                silence = try? AVAudioPlayer(data: Self.silentWAV)
+                silence?.numberOfLoops = -1
+            }
+            silence?.play()
+        } else if !wanted, silence?.isPlaying == true {
+            silence?.pause()
+        }
+    }
+
+    /// One second of 8 kHz mono 16-bit silence.
+    private static let silentWAV: Data = {
+        let sampleRate: UInt32 = 8000
+        let dataSize = sampleRate * 2
+        var wav = Data()
+        func append<T: FixedWidthInteger>(_ value: T) {
+            withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) }
+        }
+        wav.append(contentsOf: Array("RIFF".utf8)); append(36 + dataSize)
+        wav.append(contentsOf: Array("WAVEfmt ".utf8)); append(UInt32(16))
+        append(UInt16(1)); append(UInt16(1)) // PCM, mono
+        append(sampleRate); append(sampleRate * 2); append(UInt16(2)); append(UInt16(16))
+        wav.append(contentsOf: Array("data".utf8)); append(dataSize)
+        wav.append(Data(count: Int(dataSize)))
+        return wav
+    }()
+
     /// iOS has no API for the volume keys, but they change the output volume while our audio session
     /// is active. Those changes are passed on to the speaker.
     private func watchVolumeKeys() {
@@ -770,6 +816,7 @@ extension PlayerController {
     private func detachSonos() {
         #if os(iOS)
         stopWatchingVolumeKeys()
+        silence?.stop()
         #endif
         sonosPoll?.cancel()
         sonosRoom = nil

@@ -33,7 +33,7 @@ struct ProgressSlider: View {
 
     @Environment(AppModel.self) private var model
     @State private var scrubValue: Double?
-    @State private var isScrubbing = false
+    @State private var scrubCommit: Task<Void, Never>?
 
     var body: some View {
         let player = model.player
@@ -42,14 +42,13 @@ struct ProgressSlider: View {
         let slider = Slider(
             value: Binding(get: { value }, set: { newValue in
                 scrubValue = newValue
-                // The last value of a drag can arrive after editing ended, and taps may not report editing.
-                if !isScrubbing { commitScrub() }
+                // Don't rely on onEditingChanged: on iOS it sometimes never reports the end of a drag,
+                // or reports it before the last value. Seek once the knob rests briefly instead.
+                scheduleScrubCommit(after: .milliseconds(500))
             }),
             in: 0...total,
             onEditingChanged: { editing in
-                isScrubbing = editing
-                // Wait one runloop so the final drag value has been delivered.
-                if !editing { DispatchQueue.main.async { commitScrub() } }
+                if !editing { scheduleScrubCommit(after: .milliseconds(50)) }
             }
         )
         .disabled(player.currentSong == nil)
@@ -86,10 +85,14 @@ struct ProgressSlider: View {
 }
 
 extension ProgressSlider {
-    fileprivate func commitScrub() {
-        guard !isScrubbing, let target = scrubValue else { return }
-        scrubValue = nil
-        model.player.seek(to: target)
+    fileprivate func scheduleScrubCommit(after delay: Duration) {
+        scrubCommit?.cancel()
+        scrubCommit = Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let target = scrubValue else { return }
+            scrubValue = nil
+            model.player.seek(to: target)
+        }
     }
 
     @ViewBuilder

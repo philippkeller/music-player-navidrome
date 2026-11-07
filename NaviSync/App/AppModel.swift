@@ -26,6 +26,9 @@ final class AppModel {
         sync = SyncService(player: player)
 
         player.urlProvider = { [weak self] song in self?.playbackURL(for: song) }
+        player.offsetStreamURLProvider = { [weak self] song, position in
+            self?.client?.streamURL(for: song, startingAt: position)
+        }
         player.sonosTrackProvider = { [weak self] song in self?.client?.sonosTrack(for: song) }
         player.onEvent = { [weak self] event in self?.sync.handle(event) }
         player.onScrobble = { [weak self] song, submission in

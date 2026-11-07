@@ -50,6 +50,10 @@ struct ProgressSlider: View {
         )
         .disabled(player.currentSong == nil)
 
+        if let error = player.playbackError {
+            Text(error).font(.caption).foregroundStyle(.secondary)
+        }
+
         if compact {
             HStack(spacing: 8) {
                 Text(formatTime(value)).frame(width: 44, alignment: .trailing)

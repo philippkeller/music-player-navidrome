@@ -79,6 +79,18 @@ struct SubsonicClient: Sendable {
         url("stream", [URLQueryItem(name: "id", value: id), URLQueryItem(name: "format", value: "raw")])
     }
 
+    /// Timestamp seeking requires transcoding: raw streams ignore timeOffset.
+    /// Use a different format from the source so Navidrome cannot optimize this back to raw.
+    func streamURL(for song: Song, startingAt seconds: Double) -> URL {
+        let format = song.suffix?.lowercased() == "mp3" ? "aac" : "mp3"
+        return url("stream", [
+            URLQueryItem(name: "id", value: song.id),
+            URLQueryItem(name: "format", value: format),
+            URLQueryItem(name: "maxBitRate", value: "320"),
+            URLQueryItem(name: "timeOffset", value: String(Int(max(0, seconds.rounded(.down))))),
+        ])
+    }
+
     /// Sonos plays MP3, AAC and FLAC up to 48 kHz natively; everything else is transcoded to MP3 by the server.
     func sonosTrack(for song: Song) -> SonosTrack {
         let suffix = song.suffix?.lowercased() ?? ""

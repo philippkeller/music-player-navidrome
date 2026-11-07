@@ -17,6 +17,7 @@ final class PlayerController {
     private(set) var duration: Double = 0
     /// Playback is wanted but AVPlayer is waiting for data (e.g. after seeking into an unbuffered part).
     private(set) var isBuffering = false
+    private(set) var playbackError: String?
     /// Name of the current audio output when it isn't the device itself (e.g. "JBL Flip 5", "Kitchen").
     private(set) var externalOutputName: String?
     /// The Sonos room playing the queue instead of this device.
@@ -36,6 +37,7 @@ final class PlayerController {
 
     /// Returns the local file if downloaded, otherwise the stream URL.
     @ObservationIgnored var urlProvider: ((Song) -> URL?)?
+    @ObservationIgnored var offsetStreamURLProvider: ((Song, Double) -> URL?)?
     /// The stream Sonos should play (never a local file, the speaker can't reach those).
     @ObservationIgnored var sonosTrackProvider: ((Song) -> SonosTrack?)?
     @ObservationIgnored var onEvent: ((PlayerEvent) -> Void)?
@@ -53,8 +55,10 @@ final class PlayerController {
     /// Bumped on every seek and item change, so stale seek completions and watchdogs are ignored.
     @ObservationIgnored private var seekGeneration = 0
     @ObservationIgnored private var seekWatchdog: Task<Void, Never>?
-    /// The current item was recreated because a seek hung; don't retry again.
-    @ObservationIgnored private var isRetryingSeek = false
+    @ObservationIgnored private var recoveryAttempts = 0
+    /// The server starts offset streams at this absolute song position.
+    @ObservationIgnored private var streamOffset: Double = 0
+    @ObservationIgnored private var usesOffsetStream = false
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var tickCount = 0
     @ObservationIgnored private var didScrobble = false
@@ -88,14 +92,14 @@ final class PlayerController {
     #endif
 
     init() {
+        player.automaticallyWaitsToMinimizeStalling = false
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
             MainActor.assumeIsolated { self?.handleTick(time) }
         }
-        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-            Task { @MainActor in self?.isBuffering = waiting }
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.updateBuffering() }
         }
 
         let center = NotificationCenter.default
@@ -169,12 +173,11 @@ final class PlayerController {
             updateNowPlaying()
             sonos { try await $0.play() }
         } else if player.currentItem == nil {
-            loadCurrent(at: currentTime, autoplay: true)
-        } else if isSeeking {
-            // A seek is still hanging: start over at the target instead of waiting on it.
-            isRetryingSeek = true
+            loadCurrent(at: currentTime, autoplay: true, announce: false)
+        } else if playbackError != nil {
             loadCurrent(at: currentTime, autoplay: true, announce: false)
         } else {
+            recoveryAttempts = 0
             startPlayback()
         }
         onEvent?(.started)
@@ -188,6 +191,7 @@ final class PlayerController {
             player.pause()
         }
         isPlaying = false
+        updateBuffering()
         updateNowPlaying()
         onEvent?(.paused)
     }
@@ -218,17 +222,29 @@ final class PlayerController {
     }
 
     func seek(to seconds: Double) {
-        guard currentSong != nil else { return }
+        guard currentSong != nil, seconds.isFinite else { return }
         let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
         currentTime = target
-        isRetryingSeek = false
+        playbackError = nil
+        recoveryAttempts = 0
         if sonosRoom != nil {
             sonos { try await $0.seek(to: target) }
+        } else if duration > 0, target >= duration {
+            // An offset stream starting at EOF contains no audio and cannot become ready.
+            resetSeek()
+            trackFinished()
+        } else if let song = currentSong, let url = urlProvider?(song), !url.isFileURL {
+            loadCurrent(at: target, autoplay: isPlaying, announce: false)
+        } else if usesOffsetStream || player.currentItem == nil || player.currentItem?.status == .failed {
+            loadCurrent(at: target, autoplay: isPlaying, announce: false)
         } else if player.currentItem?.status == .readyToPlay {
-            performSeek(to: target, allowReload: true)
+            performSeek(to: target)
         } else {
             pendingSeek = target
+            player.pause()
+            watchPlaybackProgress()
         }
+        updateBuffering()
         updateNowPlaying()
         onEvent?(.seeked)
     }
@@ -261,6 +277,8 @@ final class PlayerController {
 
     func clear() {
         disconnectSonos()
+        resetSeek()
+        playbackError = nil
         player.replaceCurrentItem(with: nil)
         itemStatusObservation = nil
         queue = []
@@ -275,23 +293,40 @@ final class PlayerController {
 
     /// - Parameter announce: false when only recreating the item of the same song
     ///   (keeps artwork and doesn't send another "now playing" scrobble).
-    private func loadCurrent(at position: Double, autoplay: Bool, announce: Bool = true) {
+    private func loadCurrent(at position: Double, autoplay: Bool, announce: Bool = true, serverSeek: Bool = false, recovering: Bool = false) {
         if sonosRoom != nil {
             loadOnSonos(at: position, autoplay: autoplay, announce: announce)
             return
         }
-        guard let song = currentSong, let url = urlProvider?(song) else { return }
-        seekGeneration += 1
-        seekWatchdog?.cancel()
-        if announce { isRetryingSeek = false }
+        guard let song = currentSong else { return }
+        resetSeek()
+        if !recovering { recoveryAttempts = 0 }
+        currentTime = position
+        guard let originalURL = urlProvider?(song) else {
+            failSeek()
+            return
+        }
+        playbackError = nil
+        usesOffsetStream = !originalURL.isFileURL && (position > 0 || serverSeek)
+        streamOffset = usesOffsetStream ? floor(position) : 0
+        let url: URL
+        if usesOffsetStream {
+            guard let streamURL = offsetStreamURLProvider?(song, streamOffset) else {
+                failSeek()
+                return
+            }
+            url = streamURL
+        } else {
+            url = originalURL
+        }
         let item = AVPlayerItem(url: url)
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             Task { @MainActor in self?.itemStatusChanged(item) }
         }
-        pendingSeek = position > 0 ? position : nil
-        isSeeking = false
+        pendingSeek = !usesOffsetStream && position > 0 ? position : nil
+        isSeeking = usesOffsetStream
         currentTime = position
-        duration = Double(song.duration ?? 0)
+        if announce || duration <= 0 { duration = Double(song.duration ?? 0) }
         if announce {
             didScrobble = false
             tickCount = 0
@@ -305,39 +340,104 @@ final class PlayerController {
             isPlaying = false
             updateNowPlaying()
         }
+        watchPlaybackProgress()
         if announce { loadArtwork(for: song) }
     }
 
-    private func performSeek(to target: Double, allowReload: Bool) {
+    /// Keep monitoring after playback starts: AVPlayer can report playing without advancing.
+    private func watchPlaybackProgress() {
+        seekWatchdog?.cancel()
+        let generation = seekGeneration
+        let start = player.currentTime().seconds
+        seekWatchdog = Task { [weak self] in
+            var progress = PlaybackProgressWatchdog(now: ProcessInfo.processInfo.systemUptime, position: start)
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard let self, generation == self.seekGeneration, self.sonosRoom == nil,
+                      self.playbackError == nil else { return }
+                let positioning = self.isSeeking || self.pendingSeek != nil
+                let needsProgress = self.isPlaying || positioning
+                let position = self.player.currentTime().seconds
+                let stalled = progress.check(now: ProcessInfo.processInfo.systemUptime,
+                                             position: position, active: needsProgress,
+                                             positioned: !positioning)
+                if progress.advancedSeconds >= 5 { self.recoveryAttempts = 0 }
+                if stalled {
+                    self.recoverPlayback()
+                    return
+                }
+                // Restart the renderer when data arrives after a network or output stall.
+                if self.isPlaying, !positioning, self.player.currentItem?.status == .readyToPlay,
+                   self.player.timeControlStatus != .playing {
+                    self.player.playImmediately(atRate: 1)
+                }
+                self.updateBuffering()
+            }
+        }
+    }
+
+    private func recoverPlayback() {
+        guard sonosRoom == nil, currentSong != nil else { return }
+        guard recoveryAttempts < 2 else {
+            failSeek()
+            return
+        }
+        recoveryAttempts += 1
+        loadCurrent(at: currentTime, autoplay: isPlaying, announce: false,
+                    serverSeek: true, recovering: true)
+    }
+
+    private func updateBuffering() {
+        guard sonosRoom == nil else { return }
+        isBuffering = isPlaying && (isSeeking || pendingSeek != nil ||
+            player.timeControlStatus != .playing)
+    }
+
+    private func resetSeek() {
+        seekGeneration += 1
+        seekWatchdog?.cancel()
+        seekWatchdog = nil
+        player.currentItem?.cancelPendingSeeks()
+        pendingSeek = nil
+        isSeeking = false
+        isBuffering = false
+    }
+
+    private func failSeek() {
+        resetSeek()
+        player.pause()
+        itemStatusObservation = nil
+        player.replaceCurrentItem(with: nil)
+        isPlaying = false
+        playbackError = "Couldn't load this position. Press play to retry."
+        updateNowPlaying()
+        onEvent?(.paused)
+    }
+
+    private func performSeek(to target: Double) {
         guard let item = player.currentItem else { return }
-        item.cancelPendingSeeks()
         seekGeneration += 1
         let generation = seekGeneration
+        item.cancelPendingSeeks()
+        seekWatchdog?.cancel()
+        pendingSeek = nil
         isSeeking = true
-        // A little tolerance lets AVPlayer seek to the nearest frame it can reach quickly,
-        // instead of decoding forward through a long VBR stream.
+        player.pause()
+        updateBuffering()
         let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] finished in
             Task { @MainActor in
                 guard let self, generation == self.seekGeneration else { return }
+                guard finished else {
+                    self.recoverPlayback()
+                    return
+                }
                 self.isSeeking = false
-                if finished, self.isPlaying { self.player.play() }
+                if self.isPlaying { self.player.playImmediately(atRate: 1) }
+                self.updateBuffering()
             }
         }
-
-        // Seeking into a part of the stream that isn't buffered yet sometimes never completes,
-        // or completes but playback never resumes. Recreate the item at the target in that case.
-        seekWatchdog?.cancel()
-        guard allowReload else { return }
-        seekWatchdog = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(6))
-            guard let self, !Task.isCancelled, generation == self.seekGeneration else { return }
-            let stuck = self.isSeeking || (self.isPlaying && self.player.timeControlStatus != .playing)
-            guard stuck else { return }
-            print("Seek to \(target)s hung, reloading the item")
-            self.isRetryingSeek = true
-            self.loadCurrent(at: target, autoplay: self.isPlaying, announce: false)
-        }
+        watchPlaybackProgress()
     }
 
     private func startPlayback() {
@@ -349,64 +449,67 @@ final class PlayerController {
         #endif
         isPlaying = true
         // With a pending seek we start playing once the item is ready and positioned.
-        if pendingSeek == nil { player.play() }
+        if pendingSeek == nil, !isSeeking { player.playImmediately(atRate: 1) }
+        watchPlaybackProgress()
+        updateBuffering()
         updateNowPlaying()
     }
 
     private func itemStatusChanged(_ item: AVPlayerItem) {
-        guard item === player.currentItem else { return }
+        guard item === player.currentItem, playbackError == nil else { return }
         switch item.status {
         case .readyToPlay:
             let itemDuration = item.duration.seconds
-            if itemDuration.isFinite, itemDuration > 0 { duration = itemDuration }
+            // A timestamp stream contains only the remainder; its duration is not the song duration.
+            if !usesOffsetStream, itemDuration.isFinite, itemDuration > 0 { duration = itemDuration }
+            if usesOffsetStream {
+                isSeeking = false
+                if isPlaying { player.playImmediately(atRate: 1) }
+                updateBuffering()
+            }
             if let target = pendingSeek {
                 pendingSeek = nil
-                performSeek(to: target, allowReload: !isRetryingSeek)
-                isRetryingSeek = false
+                performSeek(to: target)
             }
             updateNowPlaying()
         case .failed:
             print("Playback failed: \(item.error?.localizedDescription ?? "unknown error")")
-            if isPlaying, hasNext {
-                next()
-            } else {
-                isPlaying = false
-                updateNowPlaying()
-            }
+            recoverPlayback()
         default:
             break
         }
     }
 
     private func handleTick(_ time: CMTime) {
-        guard sonosRoom == nil, !isSeeking, pendingSeek == nil else { return }
-        let seconds = time.seconds
+        guard sonosRoom == nil, !isSeeking, pendingSeek == nil, playbackError == nil,
+              player.currentItem?.status == .readyToPlay else { return }
+        // A queued callback may belong to the replaced item. Read the current item's clock.
+        let seconds = player.currentTime().seconds
         guard seconds.isFinite else { return }
-        currentTime = seconds
+        currentTime = streamOffset + seconds
         guard isPlaying else { return }
         tickCount += 1
         if tickCount % 20 == 0 { onEvent?(.tick) } // every ~10 s
-        if !didScrobble, let song = currentSong, duration > 0, seconds > min(duration / 2, 240) {
+        if !didScrobble, let song = currentSong, duration > 0, currentTime > min(duration / 2, 240) {
             didScrobble = true
             onScrobble?(song, true)
         }
     }
 
     private func trackFinished() {
+        guard !isSeeking, pendingSeek == nil, playbackError == nil else { return }
+        seekGeneration += 1
+        seekWatchdog?.cancel()
         if !didScrobble, let song = currentSong {
             didScrobble = true
             onScrobble?(song, true)
         }
         if let currentIndex, hasNext {
             self.currentIndex = currentIndex + 1
-            loadCurrent(at: 0, autoplay: true)
+            loadCurrent(at: 0, autoplay: isPlaying)
             onEvent?(.trackChanged)
         } else {
-            player.pause()
-            player.seek(to: .zero)
-            isPlaying = false
-            currentTime = 0
-            updateNowPlaying()
+            loadCurrent(at: 0, autoplay: false, announce: false)
             onEvent?(.paused)
         }
     }
@@ -426,6 +529,8 @@ final class PlayerController {
             if isPlaying {
                 wasInterrupted = true
                 isPlaying = false
+                player.pause()
+                updateBuffering()
                 updateNowPlaying()
                 onEvent?(.paused)
             }
@@ -631,12 +736,11 @@ extension PlayerController {
     #endif
 
     private func attachSonos(_ room: SonosRoom) {
+        resetSeek()
+        playbackError = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
         itemStatusObservation = nil
-        seekWatchdog?.cancel()
-        pendingSeek = nil
-        isSeeking = false
         sonosRoom = room
         sonosError = nil
         sonosFailures = 0

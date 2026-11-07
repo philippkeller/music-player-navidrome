@@ -33,19 +33,23 @@ struct ProgressSlider: View {
 
     @Environment(AppModel.self) private var model
     @State private var scrubValue: Double?
+    @State private var isScrubbing = false
 
     var body: some View {
         let player = model.player
         let total = max(player.duration, 1)
         let value = scrubValue ?? min(player.currentTime, total)
         let slider = Slider(
-            value: Binding(get: { value }, set: { scrubValue = $0 }),
+            value: Binding(get: { value }, set: { newValue in
+                scrubValue = newValue
+                // The last value of a drag can arrive after editing ended, and taps may not report editing.
+                if !isScrubbing { commitScrub() }
+            }),
             in: 0...total,
             onEditingChanged: { editing in
-                if !editing, let target = scrubValue {
-                    player.seek(to: target)
-                    scrubValue = nil
-                }
+                isScrubbing = editing
+                // Wait one runloop so the final drag value has been delivered.
+                if !editing { DispatchQueue.main.async { commitScrub() } }
             }
         )
         .disabled(player.currentSong == nil)
@@ -82,6 +86,12 @@ struct ProgressSlider: View {
 }
 
 extension ProgressSlider {
+    fileprivate func commitScrub() {
+        guard !isScrubbing, let target = scrubValue else { return }
+        scrubValue = nil
+        model.player.seek(to: target)
+    }
+
     @ViewBuilder
     fileprivate var bufferingIndicator: some View {
         if model.player.isBuffering {

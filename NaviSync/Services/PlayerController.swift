@@ -62,6 +62,8 @@ final class PlayerController {
     @ObservationIgnored private var mp3Loader: MP3OffsetLoader?
     #if os(iOS)
     @ObservationIgnored private var silence: AVAudioPlayer?
+    @ObservationIgnored private var routeBeforePicker: String?
+    @ObservationIgnored private var routePickedAt: Date?
     #endif
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var tickCount = 0
@@ -135,6 +137,7 @@ final class PlayerController {
                     self?.pause()
                 }
                 self?.updateOutputName()
+                self?.leaveSonosIfRouteChanged()
             }
         })
         // Long-form audio routes like the Music app: AirPlay 2 speakers get the
@@ -727,6 +730,29 @@ extension PlayerController {
         } else if !wanted, silence?.isPlaying == true {
             silence?.pause()
         }
+    }
+
+    func routePickerWillPresent() {
+        routeBeforePicker = currentRouteID()
+    }
+
+    func routePickerDidDismiss() {
+        routePickedAt = Date()
+        leaveSonosIfRouteChanged()
+    }
+
+    /// An output picked in the system picker while on Sonos (the silence keeps our session active,
+    /// so the picker moves it): continue there instead. The route can change shortly after the
+    /// picker closes, so route changes within a few seconds count too.
+    fileprivate func leaveSonosIfRouteChanged() {
+        guard sonosRoom != nil, let picked = routePickedAt, Date().timeIntervalSince(picked) < 5,
+              let before = routeBeforePicker, currentRouteID() != before else { return }
+        routePickedAt = nil
+        disconnectSonos()
+    }
+
+    private func currentRouteID() -> String {
+        AVAudioSession.sharedInstance().currentRoute.outputs.map(\.uid).joined(separator: ",")
     }
 
     /// One second of 8 kHz mono 16-bit silence.

@@ -10,7 +10,7 @@ struct OutputPickerButton: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        RoutePickerRepresentable(player: model.player.avPlayer)
+        RoutePickerRepresentable(controller: model.player)
             .frame(width: size, height: size)
             .help("Play on AirPlay or Bluetooth speakers")
     }
@@ -87,7 +87,7 @@ private struct SonosRoomList: View {
         let player = model.player
         List {
             Section("Play on") {
-                row(thisDevice, selected: player.sonosRoom == nil) { player.disconnectSonos() }
+                row(player.externalOutputName ?? thisDevice, selected: player.sonosRoom == nil) { player.disconnectSonos() }
                 ForEach(rooms) { room in
                     row(room.name, selected: player.sonosRoom == room) { player.connectSonos(room) }
                 }
@@ -178,23 +178,41 @@ struct SonosVolumeKeys: UIViewRepresentable {
 }
 
 private struct RoutePickerRepresentable: UIViewRepresentable {
-    let player: AVPlayer
+    let controller: PlayerController
 
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.prioritizesVideoDevices = false
         view.tintColor = .label
         view.activeTintColor = .tintColor
+        view.delegate = context.coordinator
         return view
     }
 
     func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
+
+    /// Lets picking a Bluetooth or AirPlay output here switch away from Sonos directly.
+    final class Coordinator: NSObject, AVRoutePickerViewDelegate {
+        let controller: PlayerController
+        init(controller: PlayerController) { self.controller = controller }
+
+        func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+            MainActor.assumeIsolated { controller.routePickerWillPresent() }
+        }
+
+        func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+            MainActor.assumeIsolated { controller.routePickerDidDismiss() }
+        }
+    }
 }
 
 #else
 
 private struct RoutePickerRepresentable: NSViewRepresentable {
-    let player: AVPlayer
+    let controller: PlayerController
+    private var player: AVPlayer { controller.avPlayer }
 
     func makeNSView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()

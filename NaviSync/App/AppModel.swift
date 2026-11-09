@@ -15,6 +15,7 @@ final class AppModel {
     let library: LibraryStore
     let downloads: DownloadManager
     let sync: SyncService
+    let lyrics = LyricsStore()
 
     @ObservationIgnored private(set) var client: SubsonicClient?
 
@@ -49,6 +50,7 @@ final class AppModel {
         self.client = client
         library.client = client
         downloads.client = client
+        lyrics.client = client
         sync.client = client
         CoverArtCache.shared.client = client
     }
@@ -70,6 +72,7 @@ final class AppModel {
         client = nil
         library.client = nil
         downloads.client = nil
+        lyrics.client = nil
         sync.client = nil
         CoverArtCache.shared.client = nil
     }

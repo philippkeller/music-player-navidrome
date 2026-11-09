@@ -194,6 +194,16 @@ struct SubsonicClient: Sendable {
         let _: StatusPayload = try decode(data, response)
     }
 
+    /// Synced lyrics (OpenSubsonic). Navidrome reads them from an .lrc file next to the audio
+    /// or from embedded tags. Returns nil when there are no synced lyrics.
+    func getLyrics(songId: String) async throws -> [LyricLine]? {
+        let payload = try await get("getLyricsBySongId", [URLQueryItem(name: "id", value: songId)], as: LyricsPayload.self)
+        guard let lyrics = payload.lyricsList?.structuredLyrics?.first(where: { $0.synced == true }),
+              let lines = lyrics.line, !lines.isEmpty else { return nil }
+        let offset = Double(lyrics.offset ?? 0)
+        return lines.map { LyricLine(start: max(0, (Double($0.start ?? 0) - offset) / 1000), text: $0.value ?? "") }
+    }
+
     func scrobble(id: String, submission: Bool) async throws {
         _ = try await get("scrobble", [
             URLQueryItem(name: "id", value: id),
@@ -239,6 +249,20 @@ private struct ArtistPayload: Decodable {
 private struct AlbumPayload: Decodable {
     struct AlbumWithSongs: Decodable { let song: [Song]? }
     let album: AlbumWithSongs?
+}
+
+private struct LyricsPayload: Decodable {
+    struct Line: Decodable {
+        let start: Int?
+        let value: String?
+    }
+    struct Structured: Decodable {
+        let synced: Bool?
+        let offset: Int?
+        let line: [Line]?
+    }
+    struct List: Decodable { let structuredLyrics: [Structured]? }
+    let lyricsList: List?
 }
 
 private struct PlayQueuePayload: Decodable {

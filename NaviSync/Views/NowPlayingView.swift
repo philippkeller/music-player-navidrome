@@ -4,6 +4,7 @@ struct NowPlayingView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var showQueue = false
+    @State private var showLyrics = false
 
     var body: some View {
         let player = model.player
@@ -16,7 +17,9 @@ struct NowPlayingView: View {
             }
             #endif
 
-            if showQueue {
+            if showLyrics {
+                LyricsView()
+            } else if showQueue {
                 QueueList()
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else {
@@ -29,7 +32,9 @@ struct NowPlayingView: View {
             }
 
             VStack(spacing: 4) {
-                Text(player.currentSong?.title ?? "Not Playing")
+                // Continuous album files: show the song currently playing (from the lyrics' "♪" lines).
+                Text(model.lyrics.currentSection(songId: player.currentSong?.id, at: player.currentTime)
+                     ?? player.currentSong?.title ?? "Not Playing")
                     .font(.title3.bold())
                     .lineLimit(1)
                 Text([player.currentSong?.artist, player.currentSong?.album].compactMap { $0 }.joined(separator: " — "))
@@ -53,7 +58,16 @@ struct NowPlayingView: View {
                 SonosButton()
                 OutputPickerButton()
                 Button {
-                    withAnimation { showQueue.toggle() }
+                    withAnimation { showLyrics.toggle(); showQueue = false }
+                } label: {
+                    Image(systemName: "quote.bubble")
+                        .font(.title3)
+                        .padding(8)
+                        .background(showLyrics ? Color.accentColor.opacity(0.2) : Color.clear, in: Circle())
+                }
+                .buttonStyle(.plain)
+                Button {
+                    withAnimation { showQueue.toggle(); showLyrics = false }
                 } label: {
                     Image(systemName: "list.bullet")
                         .font(.title3)
@@ -65,6 +79,9 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
+        .task(id: player.currentSong?.id) {
+            if let id = player.currentSong?.id { await model.lyrics.load(songId: id) }
+        }
         #if os(iOS)
         .presentationDragIndicator(.visible)
         #else

@@ -40,7 +40,7 @@ fi
 
 # ---- Album lookup: Deezer first (best catalog + covers), Apple Music as fallback ----
 # Prefers an exact title match and real albums over EPs/remix/expanded editions.
-GENRE=""; YEAR=""; COVER_URL=""; ITUNES_URL=""
+GENRE=""; YEAR=""; COVER_URL=""; ITUNES_URL=""; INFO=""
 NORM='def n: ascii_downcase | gsub(" *[(\\[][^)\\]]*[)\\]]"; "") | gsub("[^a-z0-9]"; "");'
 # Score: exact title > title containing the guess; penalise reissues/live/remix; prefer albums with fewer tracks.
 PICK='($b|n) as $g
@@ -128,6 +128,8 @@ yt-dlp \
   --newline \
   --progress-template "download:%(progress._percent_str)s|%(info.playlist_index)s|%(info.n_entries)s|%(progress._speed_str)s|%(progress._eta_str)s" \
   --ignore-errors \
+  --write-info-json \
+  --no-write-playlist-metafiles \
   -f bestaudio \
   --extract-audio \
   --audio-format mp3 \
@@ -140,6 +142,63 @@ if [ "$MP3_COUNT" -eq 0 ]; then
   echo "❌ No audio files downloaded"
   exit 1
 fi
+
+# ---- Song boundaries: one file per song, else YouTube chapters, else Deezer track lengths ----
+# segments.tsv: start-seconds <TAB> duration <TAB> song title
+SEGS="$TMPDIR/segments.tsv"; : > "$SEGS"
+dur() { ffprobe -v error -show_entries format=duration -of csv=p=0 "$1" < /dev/null; }
+DZ_TRACKS="$(printf '%s' "$INFO" | jq -c '[.tracks.data[]? | {title, duration}]' 2>/dev/null)"; [ -n "$DZ_TRACKS" ] || DZ_TRACKS='[]'
+DZ_N="$(echo "$DZ_TRACKS" | jq length)"
+if [ "$MP3_COUNT" -gt 1 ]; then
+  T=0; i=0
+  while read -r f; do
+    d="$(dur "$f")"
+    if [ "$DZ_N" -eq "$MP3_COUNT" ]; then title="$(echo "$DZ_TRACKS" | jq -r ".[$i].title")"
+    else title="$(jq -r '.track // .title' "${f%.mp3}.info.json" 2>/dev/null)"; fi
+    printf '%s\t%s\t%s\n' "$T" "$d" "$title" >> "$SEGS"
+    T="$(awk -v a="$T" -v b="$d" 'BEGIN { print a + b }')"; i=$((i + 1))
+  done < <(ls "$TMPDIR"/*.mp3 | sort)
+else
+  f="$(ls "$TMPDIR"/*.mp3)"; TOTAL="$(dur "$f")"
+  jq -r '[.chapters // [] | .[] | [.start_time, (.end_time - .start_time), .title]] | select(length > 1) | .[] | @tsv' \
+    "${f%.mp3}.info.json" > "$SEGS" 2>/dev/null
+  if [ ! -s "$SEGS" ] && [ "$DZ_N" -gt 1 ]; then  # full album as one video without chapters
+    echo "$DZ_TRACKS" | jq -r --argjson total "$TOTAL" \
+      'select(((map(.duration) | add) - $total | fabs) < $total * 0.03)
+       | reduce .[] as $t ({s: 0, out: []}; .out += [[.s, $t.duration, $t.title]] | .s += $t.duration) | .out[] | @tsv' > "$SEGS"
+  fi
+  [ -s "$SEGS" ] || printf '0\t%s\t%s\n' "$TOTAL" "$ALBUM" > "$SEGS"
+fi
+
+# ---- Synced lyrics from lrclib.net → <album>.lrc next to the mp3 (Navidrome serves it to the app) ----
+UA="yt.sh/1.0 (NaviSync)"
+lyrics() {  # title duration → LRC text
+  local q="artist_name=$(uri "$ARTIST")&track_name=$(uri "$1")" r
+  r="$(curl -fsS -A "$UA" "https://lrclib.net/api/get?$q&album_name=$(uri "$ALBUM")&duration=$(printf %.0f "$2")" 2>/dev/null \
+    | jq -r '.syncedLyrics // empty' 2>/dev/null)"
+  [ -z "$r" ] && r="$(curl -fsS -A "$UA" "https://lrclib.net/api/search?$q" \
+    | jq -r --argjson d "$2" '[.[] | select(.syncedLyrics) | . + {diff: ((.duration // 0) - $d | fabs)} | select(.diff < 15)]
+                              | sort_by(.diff) | .[0].syncedLyrics // empty' 2>/dev/null)"
+  printf '%s' "$r"
+}
+# Shifts LRC timestamps by $OFF seconds; prints a "♪ title" line first when $HEAD is set.
+SHIFT='sub ts { my $s = shift; my $h = int($s / 3600); my $m = int(($s - $h * 3600) / 60); my $r = $s - $h * 3600 - $m * 60;
+               $h ? sprintf("%d:%02d:%05.2f", $h, $m, $r) : sprintf("%02d:%05.2f", $m, $r) }
+  BEGIN { printf "[%s]\x{266A} %s\n", ts($ENV{OFF}), $ENV{HEAD} if $ENV{HEAD} ne "" }
+  s/\r?\n$//; my @t; push @t, $1 * 60 + $2 while s/^\s*\[(\d+):(\d+(?:\.\d+)?)\]//; next unless @t; s/^\s+//;
+  for my $x (@t) { print "[" . ts($x + $ENV{OFF}) . "]$_\n" }'
+LRC="$TMPDIR/lyrics.lrc"; : > "$LRC"
+NSEG="$(wc -l < "$SEGS" | tr -d ' ')"; FOUND=0
+while IFS=$'\t' read -r start d title; do
+  clean="$(A="$ARTIST" perl -CS -pe 's/[\[({][^\])}]*[\])}]//g; s/^\s*\d{1,2}\s*[.)\-\x{2013}]\s+//; s/^\Q$ENV{A}\E\s*[-\x{2013}]\s*//i;
+    s/\b(official (music )?(video|audio)|lyrics?|hd|hq)\b//gi; s/\s+/ /g; s/^ | $//g' <<< "$title")"
+  text="$(lyrics "$clean" "$d")"
+  [ -n "$text" ] && FOUND=$((FOUND + 1))
+  head=""; [ "$NSEG" -gt 1 ] && head="$clean"
+  printf '%s\n' "$text" | OFF="$start" HEAD="$head" perl -CS -ne "$SHIFT" >> "$LRC"
+done < "$SEGS"
+echo "📝 Lyrics: $FOUND/$NSEG songs"
+[ "$FOUND" -gt 0 ] || [ "$NSEG" -gt 1 ] && cp "$LRC" "${OUTFILE%.mp3}.lrc"
 
 # ---- Concatenate (silent ffmpeg) ----
 ls "$TMPDIR"/*.mp3 | sort | sed "s/.*/file '&'/" > "$TMPDIR/concat.txt"

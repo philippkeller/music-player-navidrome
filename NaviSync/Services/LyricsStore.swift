@@ -34,8 +34,9 @@ final class LyricsStore {
     func lines(for songId: String) -> [LyricLine]? { cache[songId] }
 
     /// Loads lyrics once per song and launch: disk first, then the server (which may have new .lrc files).
+    /// "No lyrics" is asked again each time, since an .lrc may have been added since.
     func load(songId: String) async {
-        guard cache[songId] == nil, !loading.contains(songId) else { return }
+        guard cache[songId]?.isEmpty ?? true, !loading.contains(songId) else { return }
         loading.insert(songId)
         defer { loading.remove(songId) }
         let file = Self.file(for: songId)

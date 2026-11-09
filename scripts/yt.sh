@@ -227,9 +227,10 @@ SIZE="$(stat -f %z "$OUTFILE")"
 # The .lrc must be visible too, or Navidrome scans the album without lyrics.
 LRC_FILE="${FILE%.mp3}.lrc"; LRC_SIZE="$(stat -f %z "${OUTFILE%.mp3}.lrc" 2>/dev/null || echo none)"
 echo "🔄 Waiting for file on $SERVER, then rescanning ${REL}…"
+# vfs/forget drops the R2 mount's 5 min dir cache (mount runs with --rc on localhost), so new files show up at once.
 # Wait for the new size, not just existence: a re-download keeps the same path, and the mount may still serve the old file.
 # Scan as the navidrome user: only it can write the DB. Scan exits 0 even on errors, so any output (-l error) = failure.
-if SCAN_OUT="$(ssh "$SERVER" "for i in \$(seq 1 40); do [ \"\$(stat -c %s $(printf %q "$FILE") 2>/dev/null)\" = $SIZE ] \
+if SCAN_OUT="$(ssh "$SERVER" "for i in \$(seq 1 40); do /opt/navidrome/rclone rc vfs/forget dir=$(printf %q "$REL") >/dev/null 2>&1; [ \"\$(stat -c %s $(printf %q "$FILE") 2>/dev/null)\" = $SIZE ] \
   && { [ $LRC_SIZE = none ] || [ \"\$(stat -c %s $(printf %q "$LRC_FILE") 2>/dev/null)\" = $LRC_SIZE ]; } && break; sleep 10; done; \
   cd / && sudo -n -u navidrome /opt/navidrome/navidrome scan -n -c /opt/navidrome/navidrome.toml -l error -t $(printf %q "1:$REL")" 2>&1)" \
   && [ -z "$SCAN_OUT" ]; then

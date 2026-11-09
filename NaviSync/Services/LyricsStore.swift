@@ -11,6 +11,8 @@ struct LyricLine: Codable, Hashable, Sendable {
     var headerTitle: String { String(text.dropFirst()).trimmingCharacters(in: .whitespaces) }
 }
 
+private let lyricsOffsetsKey = "lyricsOffsets"
+
 /// Synced lyrics from Navidrome (`getLyricsBySongId`), cached on disk so they work offline.
 @MainActor
 @Observable
@@ -19,6 +21,9 @@ final class LyricsStore {
     /// Empty array = the song has no synced lyrics.
     private(set) var cache: [String: [LyricLine]] = [:]
     @ObservationIgnored private var loading: Set<String> = []
+    /// Timing fixes made by tapping a line: song id → section (index of its "♪" line, 0 without one) → seconds.
+    private var offsets: [String: [String: Double]] =
+        UserDefaults.standard.dictionary(forKey: lyricsOffsetsKey) as? [String: [String: Double]] ?? [:]
 
     private static let directory: URL = {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -31,7 +36,43 @@ final class LyricsStore {
         directory.appendingPathComponent(songId.replacingOccurrences(of: "/", with: "_") + ".json")
     }
 
-    func lines(for songId: String) -> [LyricLine]? { cache[songId] }
+    /// Lyrics with the user's timing fixes applied. Song-title lines stay put: those times come from the files.
+    func lines(for songId: String) -> [LyricLine]? {
+        guard let raw = cache[songId] else { return nil }
+        guard let shifts = offsets[songId], !shifts.isEmpty else { return raw }
+        var section = 0
+        return raw.enumerated().map { index, line in
+            if line.isHeader { section = index; return line }
+            return LyricLine(start: line.start + (shifts[String(section)] ?? 0), text: line.text)
+        }
+    }
+
+    /// "This line is being sung now": shifts the timing of the line's song so the line starts at `time`.
+    func sync(songId: String, lineIndex: Int, to time: Double) {
+        guard let raw = cache[songId], raw.indices.contains(lineIndex), !raw[lineIndex].isHeader else { return }
+        offsets[songId, default: [:]][String(section(of: lineIndex, in: raw))] = time - raw[lineIndex].start
+        saveOffsets()
+    }
+
+    func resetTiming(songId: String, lineIndex: Int) {
+        guard let raw = cache[songId] else { return }
+        offsets[songId]?[String(section(of: lineIndex, in: raw))] = nil
+        if offsets[songId]?.isEmpty == true { offsets[songId] = nil }
+        saveOffsets()
+    }
+
+    func hasTimingFix(songId: String, lineIndex: Int) -> Bool {
+        guard let raw = cache[songId] else { return false }
+        return offsets[songId]?[String(section(of: lineIndex, in: raw))] != nil
+    }
+
+    private func section(of lineIndex: Int, in lines: [LyricLine]) -> Int {
+        lines[...min(lineIndex, lines.count - 1)].lastIndex(where: \.isHeader) ?? 0
+    }
+
+    private func saveOffsets() {
+        UserDefaults.standard.set(offsets, forKey: lyricsOffsetsKey)
+    }
 
     /// Loads lyrics once per song and launch: disk first, then the server (which may have new .lrc files).
     /// "No lyrics" is asked again each time, since an .lrc may have been added since.

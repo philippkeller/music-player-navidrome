@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Spotify-style lyrics: follows playback, highlights the current line, tap a line to jump there.
+/// Spotify-style lyrics that follow playback. Tapping a line means "this is being sung now" and fixes
+/// the timing of that song; long-press a line to jump there or undo the fix.
 struct LyricsView: View {
     @Environment(AppModel.self) private var model
 
@@ -10,9 +11,15 @@ struct LyricsView: View {
         let lines = songId.flatMap { model.lyrics.lines(for: $0) }
         Group {
             if let lines, !lines.isEmpty {
-                LyricsList(lines: lines, current: LyricsStore.currentIndex(in: lines, at: player.currentTime)) {
-                    player.seek(to: $0)
-                }
+                let store = model.lyrics
+                LyricsList(
+                    lines: lines,
+                    current: LyricsStore.currentIndex(in: lines, at: player.currentTime),
+                    syncHere: { index in if let songId { store.sync(songId: songId, lineIndex: index, to: player.currentTime) } },
+                    jump: { player.seek(to: $0) },
+                    canReset: { index in songId.map { store.hasTimingFix(songId: $0, lineIndex: index) } ?? false },
+                    reset: { index in if let songId { store.resetTiming(songId: songId, lineIndex: index) } }
+                )
             } else if lines == nil {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -31,7 +38,10 @@ struct LyricsView: View {
 private struct LyricsList: View {
     let lines: [LyricLine]
     let current: Int?
-    let seek: (Double) -> Void
+    let syncHere: (Int) -> Void
+    let jump: (Double) -> Void
+    let canReset: (Int) -> Bool
+    let reset: (Int) -> Void
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -39,11 +49,17 @@ private struct LyricsList: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                         Button {
-                            seek(line.start)
+                            if line.isHeader { jump(line.start) } else { syncHere(index) }
                         } label: {
                             row(line, isCurrent: index == current)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Play from Here", systemImage: "play") { jump(line.start) }
+                            if !line.isHeader && canReset(index) {
+                                Button("Reset Timing", systemImage: "arrow.uturn.backward") { reset(index) }
+                            }
+                        }
                         .id(index)
                     }
                 }

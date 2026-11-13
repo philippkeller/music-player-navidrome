@@ -32,6 +32,11 @@ final class AppModel {
         }
         player.sonosTrackProvider = { [weak self] song in self?.client?.sonosTrack(for: song) }
         player.onEvent = { [weak self] event in self?.sync.handle(event) }
+        player.sectionTitleProvider = { [weak self] song, time in
+            guard let lyrics = self?.lyrics else { return nil }
+            if lyrics.cache[song.id] == nil { Task { await lyrics.load(songId: song.id) } }
+            return lyrics.currentSection(songId: song.id, at: time)
+        }
         player.onScrobble = { [weak self] song, submission in
             guard let client = self?.client else { return }
             Task { try? await client.scrobble(id: song.id, submission: submission) }

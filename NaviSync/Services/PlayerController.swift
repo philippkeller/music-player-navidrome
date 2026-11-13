@@ -43,6 +43,9 @@ final class PlayerController {
     @ObservationIgnored var onEvent: ((PlayerEvent) -> Void)?
     /// (song, submission): submission=false is "now playing", true is a real scrobble.
     @ObservationIgnored var onScrobble: ((Song, Bool) -> Void)?
+    /// Song title playing at a position of a continuous album file (from the lyrics), for the lock screen.
+    @ObservationIgnored var sectionTitleProvider: ((Song, Double) -> String?)?
+    @ObservationIgnored private var nowPlayingTitle: String?
 
     @ObservationIgnored private let player = AVPlayer()
     /// Exposed for the macOS AirPlay picker, which routes a specific player.
@@ -502,6 +505,9 @@ final class PlayerController {
         let seconds = player.currentTime().seconds
         guard seconds.isFinite else { return }
         currentTime = streamOffset + seconds
+        if let song = currentSong, nowPlayingTitle != (sectionTitleProvider?(song, currentTime) ?? song.title) {
+            updateNowPlaying()
+        }
         guard isPlaying else { return }
         tickCount += 1
         if tickCount % 20 == 0 { onEvent?(.tick) } // every ~10 s
@@ -608,8 +614,10 @@ final class PlayerController {
             #endif
             return
         }
+        let title = sectionTitleProvider?(song, currentTime) ?? song.title
+        nowPlayingTitle = title
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: song.title,
+            MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: song.artist ?? "",
             MPMediaItemPropertyAlbumTitle: song.album ?? "",
             MPMediaItemPropertyPlaybackDuration: duration,

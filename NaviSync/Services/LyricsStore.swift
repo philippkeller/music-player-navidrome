@@ -103,6 +103,12 @@ final class LyricsStore {
         lines.lastIndex { $0.start <= time + 0.3 }
     }
 
+    /// The songs of a continuous album file ("♪" lines), empty for a normal song.
+    func sections(songId: String?) -> [LyricLine] {
+        guard let songId, let lines = cache[songId] else { return [] }
+        return lines.filter(\.isHeader)
+    }
+
     /// Song title (from a "♪" line) playing at `time` in a continuous album file.
     func currentSection(songId: String?, at time: Double) -> String? {
         guard let songId, let lines = cache[songId] else { return nil }

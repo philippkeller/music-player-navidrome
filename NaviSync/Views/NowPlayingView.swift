@@ -33,10 +33,31 @@ struct NowPlayingView: View {
 
             VStack(spacing: 4) {
                 // Continuous album files: show the song currently playing (from the lyrics' "♪" lines).
-                Text(model.lyrics.currentSection(songId: player.currentSong?.id, at: player.currentTime)
-                     ?? player.currentSong?.title ?? "Not Playing")
-                    .font(.title3.bold())
-                    .lineLimit(1)
+                let title = model.lyrics.currentSection(songId: player.currentSong?.id, at: player.currentTime)
+                    ?? player.currentSong?.title ?? "Not Playing"
+                let sections = model.lyrics.sections(songId: player.currentSong?.id)
+                if sections.count > 1 {
+                    // Tap the title to jump to another song of the album file.
+                    Menu {
+                        ForEach(Array(sections.enumerated()), id: \.offset) { number, section in
+                            Button("\(number + 1). \(section.headerTitle)") { player.seek(to: section.start) }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(title).lineLimit(1)
+                            Image(systemName: "chevron.down").font(.caption.bold())
+                        }
+                        .font(.title3.bold())
+                        .foregroundStyle(.primary)
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                } else {
+                    Text(title)
+                        .font(.title3.bold())
+                        .lineLimit(1)
+                }
                 Text([player.currentSong?.artist, player.currentSong?.album].compactMap { $0 }.joined(separator: " — "))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

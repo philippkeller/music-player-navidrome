@@ -51,6 +51,7 @@ struct NowPlayingView: View {
                         .foregroundStyle(.primary)
                     }
                     .menuStyle(.button)
+                    .menuOrder(.fixed)
                     .buttonStyle(.plain)
                     .fixedSize()
                 } else {

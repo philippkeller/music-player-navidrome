@@ -163,9 +163,18 @@ else
   jq -r '[.chapters // [] | .[] | [.start_time, (.end_time - .start_time), .title]] | select(length > 1) | .[] | @tsv' \
     "${f%.mp3}.info.json" > "$SEGS" 2>/dev/null
   if [ ! -s "$SEGS" ] && [ "$DZ_N" -gt 1 ]; then  # full album as one video without chapters
-    echo "$DZ_TRACKS" | jq -r --argjson total "$TOTAL" \
-      'select(((map(.duration) | add) - $total | fabs) < $total * 0.03)
-       | reduce .[] as $t ({s: 0, out: []}; .out += [[.s, $t.duration, $t.title]] | .s += $t.duration) | .out[] | @tsv' > "$SEGS"
+    # Deezer often lists a deluxe edition: use the longest leading run of tracks that fits the video
+    # (a leftover > 60s becomes the next track, e.g. a hidden track), then snap each cut to the nearest silence.
+    SIL="$(ffmpeg -nostats -i "$f" -map 0:a -af silencedetect=n=-35dB:d=0.3 -f null - 2>&1 < /dev/null \
+      | perl -ne '$s = $1 if /silence_start: ([\d.]+)/; print(($s + $1) / 2, "\n") if /silence_end: ([\d.]+)/' | jq -sc .)"
+    echo "$DZ_TRACKS" | jq -r --argjson total "$TOTAL" --argjson sil "${SIL:-[]}" '
+      [foreach .[] as $t (0; . + $t.duration; {t: $t.title, end: .})] as $cum
+      | ([$cum[] | select(.end <= $total * 1.03)] | length) as $k
+      | select($k >= 2 and $cum[$k - 1].end >= $total * 0.8)
+      | ($cum[:$k] + (if $total - $cum[$k - 1].end > 60 and $k < length then [$cum[$k]] else [] end)) as $use
+      | ((reduce ($use[:-1] | to_entries[]) as $u ([0]; (.[-1] + ($u.value.end - (if $u.key > 0 then $use[$u.key - 1].end else 0 end))) as $e | . + [([$sil[] | select(. - $e | fabs < 15)] | min_by(. - $e | fabs)) // $e])) + [$total]) as $b
+      | range(0; $use | length) | [$b[.], $b[. + 1] - $b[.], $use[.].t] | @tsv' > "$SEGS"
+    [ -s "$SEGS" ] && echo "✂️  Split into $(wc -l < "$SEGS" | tr -d ' ') tracks (Deezer lengths + silence)"
   fi
   [ -s "$SEGS" ] || printf '0\t%s\t%s\n' "$TOTAL" "$ALBUM" > "$SEGS"
 fi
